@@ -2,6 +2,10 @@
 
 公开的 GitHub Pages 版本，覆盖 31 家 A 股与全球科技公司。
 
+## 在线访问
+
+https://13760895561-cpu.github.io/ken-tech-valuation-dashboard/
+
 ## 数据更新
 
 - 页面打开后直接从腾讯行情与 Frankfurter 汇率获取实时数据。
