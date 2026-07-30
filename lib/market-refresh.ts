@@ -11,11 +11,18 @@ import type {
   HistoryRecord,
 } from "./dashboard-types";
 
-const TENCENT_SOURCE = "https://qt.gtimg.cn/";
+export const TENCENT_QUOTE_SOURCE = "https://qt.gtimg.cn/";
 const FX_SOURCE =
   "https://api.frankfurter.dev/v1/latest?base=USD&symbols=CNY,HKD";
 
-interface QuoteUpdate {
+interface QuoteInstrument {
+  id: string;
+  name: string;
+  quote_code: string;
+  name_quote?: string;
+}
+
+export interface TencentQuoteUpdate {
   name: string;
   priceLocal: number;
   previousCloseLocal: number | null;
@@ -23,6 +30,17 @@ interface QuoteUpdate {
   quoteDate: string;
   sharesMillion: number;
   marketCapLocal100m: number;
+}
+
+export interface CustomQuoteRequest {
+  id: string;
+  name: string;
+  quoteCode: string;
+}
+
+export interface CustomQuoteRefreshResult {
+  updates: Map<string, TencentQuoteUpdate>;
+  errors: Record<string, string>;
 }
 
 export interface RefreshResult {
@@ -95,18 +113,18 @@ function parseQuoteDate(value: string): string | null {
 
 function parseTencentQuotes(
   text: string,
-  companies: CompanySnapshot[],
-): Map<string, QuoteUpdate> {
+  companies: QuoteInstrument[],
+): Map<string, TencentQuoteUpdate> {
   const byQuoteCode = new Map(
-    companies.map((company) => [company.quote_code, company]),
+    companies.map((company) => [company.quote_code.toLowerCase(), company]),
   );
-  const updates = new Map<string, QuoteUpdate>();
-  const pattern = /v_([A-Za-z0-9]+)="(.*?)";/g;
+  const updates = new Map<string, TencentQuoteUpdate>();
+  const pattern = /v_([A-Za-z0-9._-]+)="(.*?)";/g;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text))) {
     const [, quoteCode, payload] = match;
-    const company = byQuoteCode.get(quoteCode);
+    const company = byQuoteCode.get(quoteCode.toLowerCase());
     if (!company) continue;
     const fields = payload.split("~");
     if (fields.length < 46) continue;
@@ -146,8 +164,8 @@ function parseTencentQuotes(
 
 async function fetchQuotes(
   companies: CompanySnapshot[],
-): Promise<Map<string, QuoteUpdate>> {
-  const url = `${TENCENT_SOURCE}q=${companies
+): Promise<Map<string, TencentQuoteUpdate>> {
+  const url = `${TENCENT_QUOTE_SOURCE}q=${companies
     .map((company) => company.quote_code)
     .join(",")}`;
   const response = await fetchWithRetry(url, "腾讯行情");
@@ -165,6 +183,59 @@ async function fetchQuotes(
     );
   }
   return updates;
+}
+
+export async function fetchCustomQuoteUpdates(
+  requests: CustomQuoteRequest[],
+): Promise<CustomQuoteRefreshResult> {
+  const updates = new Map<string, TencentQuoteUpdate>();
+  const errors: Record<string, string> = {};
+  const unique = [
+    ...new Map(
+      requests
+        .filter(
+          (request) =>
+            request.id.trim() &&
+            request.name.trim() &&
+            request.quoteCode.trim(),
+        )
+        .map((request) => [request.id, request]),
+    ).values(),
+  ];
+
+  for (let index = 0; index < unique.length; index += 30) {
+    const chunk = unique.slice(index, index + 30);
+    const instruments: QuoteInstrument[] = chunk.map((request) => ({
+      id: request.id,
+      name: request.name,
+      quote_code: request.quoteCode,
+    }));
+    try {
+      const url = `${TENCENT_QUOTE_SOURCE}q=${instruments
+        .map((instrument) => instrument.quote_code)
+        .join(",")}`;
+      const response = await fetchWithRetry(url, "自定义公司腾讯行情");
+      const parsed = parseTencentQuotes(
+        decodeTencent(await response.arrayBuffer()),
+        instruments,
+      );
+      for (const instrument of instruments) {
+        const quote = parsed.get(instrument.id);
+        if (quote) {
+          updates.set(instrument.id, quote);
+        } else {
+          errors[instrument.id] = "腾讯行情未返回有效价格、市值或行情日期";
+        }
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      for (const instrument of instruments) {
+        errors[instrument.id] = message;
+      }
+    }
+  }
+
+  return { updates, errors };
 }
 
 async function fetchFx(): Promise<FxSnapshot> {
@@ -207,29 +278,57 @@ function stringifyNumber(value: number | null): string {
   return value === null || !Number.isFinite(value) ? "" : String(value);
 }
 
+function normalizedCurrency(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toUpperCase()
+    : fallback;
+}
+
+function companyCurrencies(company: CompanySnapshot): {
+  quoteCurrency: string;
+  financialCurrency: string;
+} {
+  const legacyCurrency = normalizedCurrency(company.currency, "");
+  return {
+    quoteCurrency: normalizedCurrency(
+      company.quote_currency,
+      legacyCurrency,
+    ),
+    financialCurrency: normalizedCurrency(
+      company.financial_currency,
+      company.market === "HK" ? "CNY" : legacyCurrency,
+    ),
+  };
+}
+
 function historyRowsForSnapshot(
   asOf: string,
   companies: DerivedCompany[],
 ): HistoryRecord[] {
   return companies
     .filter((company) => company.market === "A")
-    .map((company) => ({
-      快照日期: asOf,
-      代码: company.id,
-      公司: company.name,
-      分组: company.group,
-      地区: company.region,
-      币种: company.currency,
-      财务报告期: company.report_period,
-      股价本币: stringifyNumber(finiteNumber(company.price_local)),
-      市值亿元人民币: stringifyNumber(company.currentMarketCapCny100m),
-      EV_Sales: stringifyNumber(company.evSales),
-      EV_GrossProfit: stringifyNumber(company.evGrossProfit),
-      PE: stringifyNumber(company.pe),
-      P_FCF: stringifyNumber(company.pFcf),
-      人均市值万元: stringifyNumber(company.marketCapPerEmployeeCny10k),
-      数据状态: company.coreStatus,
-    }));
+    .map((company) => {
+      const { quoteCurrency, financialCurrency } = companyCurrencies(company);
+      return {
+        快照日期: asOf,
+        代码: company.id,
+        公司: company.name,
+        分组: company.group,
+        地区: company.region,
+        币种: quoteCurrency,
+        行情币种: quoteCurrency,
+        财务币种: financialCurrency,
+        财务报告期: company.report_period,
+        股价本币: stringifyNumber(finiteNumber(company.price_local)),
+        市值亿元人民币: stringifyNumber(company.currentMarketCapCny100m),
+        EV_Sales: stringifyNumber(company.evSales),
+        EV_GrossProfit: stringifyNumber(company.evGrossProfit),
+        PE: stringifyNumber(company.pe),
+        P_FCF: stringifyNumber(company.pFcf),
+        人均市值万元: stringifyNumber(company.marketCapPerEmployeeCny10k),
+        数据状态: company.coreStatus,
+      };
+    });
 }
 
 function upsertDailyHistory(
@@ -279,9 +378,16 @@ export async function refreshMarketDataset(
   const companies = current.snapshot.companies.map((company) => {
     const quote = quotes.get(company.id);
     if (!quote) throw new Error(`缺少 ${company.id} 的已验证行情`);
-    const fxToCny = finiteNumber(fx.rates_to_cny[company.currency]);
-    if (fxToCny === null || fxToCny <= 0) {
-      throw new Error(`缺少 ${company.currency} 对人民币汇率`);
+    const { quoteCurrency, financialCurrency } = companyCurrencies(company);
+    const quoteFxToCny = finiteNumber(fx.rates_to_cny[quoteCurrency]);
+    if (quoteFxToCny === null || quoteFxToCny <= 0) {
+      throw new Error(`缺少行情币种 ${quoteCurrency} 对人民币汇率`);
+    }
+    const financialFxToCny = finiteNumber(
+      fx.rates_to_cny[financialCurrency],
+    );
+    if (financialFxToCny === null || financialFxToCny <= 0) {
+      throw new Error(`缺少财务币种 ${financialCurrency} 对人民币汇率`);
     }
     return {
       ...company,
@@ -293,9 +399,14 @@ export async function refreshMarketDataset(
       shares_million: quote.sharesMillion,
       market_cap_local_100m: quote.marketCapLocal100m,
       quote_market_cap_check_100m: quote.marketCapLocal100m,
-      quote_source: TENCENT_SOURCE,
+      quote_source: TENCENT_QUOTE_SOURCE,
       quote_status: "fresh",
-      fx_to_cny: fxToCny,
+      currency: quoteCurrency,
+      quote_currency: quoteCurrency,
+      financial_currency: financialCurrency,
+      fx_to_cny: quoteFxToCny,
+      quote_fx_to_cny: quoteFxToCny,
+      financial_fx_to_cny: financialFxToCny,
     };
   });
 
@@ -316,7 +427,7 @@ export async function refreshMarketDataset(
     quote_date_max: quoteDateMax,
     fx,
     quote_meta: {
-      source: TENCENT_SOURCE,
+      source: TENCENT_QUOTE_SOURCE,
       sample_count: companies.length,
       success_count: companies.length,
       status: "ok",

@@ -9,10 +9,12 @@
     "dev": "next dev",
     "prebuild": "npm run sync:static",
     "build": "next build",
-    "test": "npm run build && node --test tests/static-export.test.mjs",
+    "test": "npm run build && node --test tests/static-export.test.mjs && tsx --test tests/watch-pool.test.ts",
     "check": "tsc --noEmit",
     "sync:static": "tsx scripts/refresh-static-data.ts --copy",
-    "refresh:static": "tsx scripts/refresh-static-data.ts --refresh"
+    "refresh:static": "tsx scripts/refresh-static-data.ts --refresh",
+    "prepare:financials": "tsx scripts/prepare-financial-input.ts",
+    "apply:financials": "tsx scripts/apply-financial-snapshot.ts"
   },
   "dependencies": {
     "next": "16.2.12",

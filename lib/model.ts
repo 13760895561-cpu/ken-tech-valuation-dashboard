@@ -33,6 +33,24 @@ function multiply(left: unknown, right: unknown): number | null {
   return a === null || b === null ? null : a * b;
 }
 
+function normalizedCurrency(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toUpperCase()
+    : fallback;
+}
+
+function currencyFxToCny(
+  explicitFx: unknown,
+  currency: string,
+  legacyCurrency: string,
+  legacyFx: unknown,
+): number | null {
+  const explicit = finiteNumber(explicitFx);
+  if (explicit !== null) return explicit;
+  if (currency === "CNY") return 1;
+  return currency === legacyCurrency ? finiteNumber(legacyFx) : null;
+}
+
 function divide(
   numerator: unknown,
   denominator: unknown,
@@ -77,22 +95,51 @@ function stat(
 }
 
 function deriveCompany(company: CompanySnapshot): DerivedCompany {
-  const fx = finiteNumber(company.fx_to_cny);
+  const legacyCurrency = normalizedCurrency(company.currency, "");
+  const quoteCurrency = normalizedCurrency(
+    company.quote_currency,
+    legacyCurrency,
+  );
+  const financialCurrency = normalizedCurrency(
+    company.financial_currency,
+    legacyCurrency,
+  );
+  const quoteFxToCny = currencyFxToCny(
+    company.quote_fx_to_cny,
+    quoteCurrency,
+    legacyCurrency,
+    company.fx_to_cny,
+  );
+  const financialFxToCny = currencyFxToCny(
+    company.financial_fx_to_cny,
+    financialCurrency,
+    legacyCurrency,
+    company.fx_to_cny,
+  );
   const currentMarketCapCny100m = multiply(
     company.market_cap_local_100m,
-    fx,
+    quoteFxToCny,
   );
-  const revenueCny100m = multiply(company.revenue_local_100m, fx);
-  const grossProfitCny100m = multiply(company.gross_profit_local_100m, fx);
-  const netProfitCny100m = multiply(company.net_profit_local_100m, fx);
-  const ocfCny100m = multiply(company.ocf_local_100m, fx);
-  const capexCny100m = multiply(company.capex_local_100m, fx);
+  const revenueCny100m = multiply(
+    company.revenue_local_100m,
+    financialFxToCny,
+  );
+  const grossProfitCny100m = multiply(
+    company.gross_profit_local_100m,
+    financialFxToCny,
+  );
+  const netProfitCny100m = multiply(
+    company.net_profit_local_100m,
+    financialFxToCny,
+  );
+  const ocfCny100m = multiply(company.ocf_local_100m, financialFxToCny);
+  const capexCny100m = multiply(company.capex_local_100m, financialFxToCny);
   const fcfCny100m =
     ocfCny100m === null || capexCny100m === null
       ? null
       : ocfCny100m - capexCny100m;
-  const cashCny100m = multiply(company.cash_local_100m, fx);
-  const debtCny100m = multiply(company.debt_local_100m, fx);
+  const cashCny100m = multiply(company.cash_local_100m, financialFxToCny);
+  const debtCny100m = multiply(company.debt_local_100m, financialFxToCny);
   const enterpriseValueCny100m =
     currentMarketCapCny100m === null ||
     cashCny100m === null ||
@@ -121,6 +168,10 @@ function deriveCompany(company: CompanySnapshot): DerivedCompany {
 
   return {
     ...company,
+    quote_currency: quoteCurrency,
+    financial_currency: financialCurrency,
+    quote_fx_to_cny: quoteFxToCny,
+    financial_fx_to_cny: financialFxToCny,
     currentMarketCapCny100m,
     revenueCny100m,
     grossProfitCny100m,

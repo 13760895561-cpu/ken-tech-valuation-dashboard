@@ -6,6 +6,8 @@
 /.wrangler/
 /out/
 /coverage/
+/automation/config/
+/automation/data/
 /.env*
 /.dev.vars*
 *.log

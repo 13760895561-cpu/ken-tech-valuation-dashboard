@@ -11,8 +11,25 @@ import {
   type ReactNode,
 } from "react";
 import type { DashboardDataset } from "@/lib/dashboard-types";
-import { refreshMarketDataset } from "@/lib/market-refresh";
+import {
+  TENCENT_QUOTE_SOURCE,
+  fetchCustomQuoteUpdates,
+  refreshMarketDataset,
+} from "@/lib/market-refresh";
 import { buildDashboardData } from "@/lib/model";
+import {
+  WATCH_POOL_STORAGE_KEY,
+  emptyWatchPoolState,
+  loadWatchPool,
+  saveWatchPool,
+  sanitizeWatchPoolState,
+  type CustomQuoteSnapshot,
+  type CustomWatchCompany,
+  type WatchPoolState,
+} from "@/lib/watch-pool";
+import WatchPoolManager, {
+  type DefaultWatchCompany,
+} from "./WatchPoolManager";
 import "./dashboard.css";
 
 type Primitive = string | number | boolean | null | undefined;
@@ -55,6 +72,8 @@ export interface DashboardCompany extends UnknownRecord {
   quote_source?: string | null;
   official_report_source?: string | null;
   structured_source?: string | null;
+  trackingOrigin?: "default" | "custom";
+  customNote?: string | null;
 }
 
 export interface DashboardValuation extends UnknownRecord {
@@ -896,7 +915,7 @@ function CoreTable({
   return (
     <div className="table-scroll">
       <table className="data-table core-table">
-        <caption className="sr-only">31家公司核心经营与估值指标</caption>
+        <caption className="sr-only">当前观察池公司的行情、经营与估值指标</caption>
         <thead>
           <tr>
             <th scope="col">
@@ -951,7 +970,18 @@ function CoreTable({
                 <th scope="row">
                   <span className="ticker">{company.ticker}</span>
                   <strong>{company.name}</strong>
-                  <small>{company.report_period || "报告期未标注"}</small>
+                  {company.trackingOrigin === "custom" ? (
+                    <small className="custom-company-badge">
+                      用户添加 · 仅行情
+                    </small>
+                  ) : (
+                    <small>{company.report_period || "报告期未标注"}</small>
+                  )}
+                  {company.customNote ? (
+                    <small className="custom-company-note">
+                      {company.customNote}
+                    </small>
+                  ) : null}
                 </th>
                 <td>
                   <span className="market-tag">{company.region}</span>
@@ -1248,6 +1278,11 @@ function SourcesTable({ companies }: { companies: DashboardCompany[] }) {
                 <th scope="row">
                   <span className="ticker">{company.ticker}</span>
                   <strong>{company.name}</strong>
+                  {company.trackingOrigin === "custom" ? (
+                    <small className="custom-company-badge">
+                      用户添加 · 不参与估值
+                    </small>
+                  ) : null}
                 </th>
                 <td>{company.quote_date || "—"}</td>
                 <td>
@@ -1460,6 +1495,96 @@ function getFxDate(fx: UnknownRecord | undefined): string {
   return asString(firstValue(fx ?? {}, ["date", "fxDate", "asOf"]));
 }
 
+function customCompanyView(
+  company: CustomWatchCompany,
+  quote: CustomQuoteSnapshot | undefined,
+  fx: UnknownRecord | undefined,
+): DashboardCompany {
+  const rates =
+    fx?.rates_to_cny &&
+    typeof fx.rates_to_cny === "object" &&
+    !Array.isArray(fx.rates_to_cny)
+      ? (fx.rates_to_cny as UnknownRecord)
+      : {};
+  const fxToCny =
+    company.currency === "CNY"
+      ? 1
+      : asNumber(rates[company.currency]);
+  const marketCapCny =
+    quote?.marketCapLocal100m !== null &&
+    quote?.marketCapLocal100m !== undefined &&
+    fxToCny !== null
+      ? quote.marketCapLocal100m * fxToCny
+      : null;
+  return {
+    id: company.id,
+    name: company.name,
+    ticker: company.ticker,
+    group: "自定义观察",
+    region: company.region,
+    market: company.market,
+    role: "用户自定义（仅行情）",
+    currency: company.currency,
+    price_local: quote?.priceLocal ?? null,
+    change_pct: quote?.changePct ?? null,
+    quote_date: quote?.quoteDate ?? null,
+    report_period: null,
+    report_date: null,
+    employees: null,
+    currentMarketCapCny100m: marketCapCny,
+    revenueCny100m: null,
+    grossProfitCny100m: null,
+    netProfitCny100m: null,
+    fcfCny100m: null,
+    enterpriseValueCny100m: null,
+    revenuePerEmployeeCny10k: null,
+    grossProfitPerEmployeeCny10k: null,
+    netProfitPerEmployeeCny10k: null,
+    marketCapPerEmployeeCny10k: null,
+    ps: null,
+    priceToGrossProfit: null,
+    evSales: null,
+    evGrossProfit: null,
+    pe: null,
+    pFcf: null,
+    fcfYield: null,
+    coreStatus: quote?.status === "fresh" ? "仅行情" : "行情待核验",
+    valuationInputStatus: "不参与估值",
+    quote_source: company.quoteCode
+      ? `${TENCENT_QUOTE_SOURCE}q=${company.quoteCode}`
+      : null,
+    official_report_source: null,
+    structured_source: null,
+    trackingOrigin: "custom",
+    customNote: company.note || null,
+  };
+}
+
+function scopeRowsToActiveCompanies(
+  rows: UnknownRecord[],
+  defaultCompanies: DashboardCompany[],
+  activeIds: Set<string>,
+): UnknownRecord[] {
+  const keys = new Map<string, string>();
+  for (const company of defaultCompanies) {
+    for (const key of [company.id, company.ticker, company.name]) {
+      if (key) keys.set(key.toLocaleLowerCase("zh-CN"), company.id);
+    }
+  }
+  return rows.filter((row) => {
+    const candidates = [
+      firstValue(row, ["代码", "ticker", "id"]),
+      firstValue(row, ["公司", "company", "name"]),
+    ]
+      .map(asString)
+      .filter(Boolean);
+    const matchedId = candidates
+      .map((value) => keys.get(value.toLocaleLowerCase("zh-CN")))
+      .find(Boolean);
+    return !matchedId || activeIds.has(matchedId);
+  });
+}
+
 export function Dashboard({
   initialData,
   initialDataset,
@@ -1470,6 +1595,13 @@ export function Dashboard({
       normalizeInitial(initialData) ??
       (initialDataset ? responseFromDataset(initialDataset) : null),
     [initialData, initialDataset],
+  );
+  const defaultCompanyIds = useMemo(
+    () =>
+      initialDataset?.snapshot.companies.map((company) => company.id) ??
+      normalizedInitial?.data.companies?.map((company) => company.id) ??
+      [],
+    [initialDataset, normalizedInitial],
   );
   const [response, setResponse] = useState<DashboardResponse | null>(normalizedInitial);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -1482,9 +1614,137 @@ export function Dashboard({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(pollIntervalSeconds);
+  const [watchPool, setWatchPool] = useState<WatchPoolState>(
+    emptyWatchPoolState,
+  );
+  const [watchPoolOpen, setWatchPoolOpen] = useState(false);
+  const [watchPoolLoaded, setWatchPoolLoaded] = useState(false);
+  const [storageWarning, setStorageWarning] = useState("");
+  const [customQuotesRefreshing, setCustomQuotesRefreshing] = useState(false);
   const inFlight = useRef(false);
   const datasetRef = useRef<DashboardDataset | null>(initialDataset ?? null);
   const lastManualAttemptRef = useRef(0);
+  const watchPoolRef = useRef<WatchPoolState>(watchPool);
+
+  useEffect(() => {
+    watchPoolRef.current = watchPool;
+  }, [watchPool]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        setWatchPool(loadWatchPool(window.localStorage, defaultCompanyIds));
+        setStorageWarning("");
+      } catch {
+        setWatchPool(emptyWatchPoolState());
+        setStorageWarning(
+          "当前浏览器无法读取已保存的观察池；本次修改仍可导出，但刷新页面后可能丢失。",
+        );
+      } finally {
+        setWatchPoolLoaded(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [defaultCompanyIds]);
+
+  useEffect(() => {
+    if (!watchPoolLoaded) return;
+    const timer = window.setTimeout(() => {
+      try {
+        saveWatchPool(window.localStorage, watchPool);
+        setStorageWarning("");
+      } catch {
+        setStorageWarning(
+          "当前浏览器无法保存观察池；请及时导出文件或同步码。",
+        );
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [watchPool, watchPoolLoaded]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== WATCH_POOL_STORAGE_KEY) return;
+      if (!event.newValue) {
+        setWatchPool(emptyWatchPoolState());
+        return;
+      }
+      try {
+        setWatchPool(
+          sanitizeWatchPoolState(
+            JSON.parse(event.newValue) as unknown,
+            defaultCompanyIds,
+          ),
+        );
+      } catch {
+        setStorageWarning("其他标签页传来的观察池数据无效，已忽略。");
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [defaultCompanyIds]);
+
+  const refreshCustomQuotes = useCallback(
+    async (selected?: CustomWatchCompany[]) => {
+      const targets = (
+        selected ?? watchPoolRef.current.customCompanies
+      ).filter((company) => company.quoteCode);
+      if (!targets.length) return { success: 0, total: 0 };
+      setCustomQuotesRefreshing(true);
+      try {
+        const result = await fetchCustomQuoteUpdates(
+          targets.map((company) => ({
+            id: company.id,
+            name: company.name,
+            quoteCode: company.quoteCode ?? "",
+          })),
+        );
+        const updatedAt = new Date().toISOString();
+        setWatchPool((current) => {
+          const quoteCache = { ...current.quoteCache };
+          const activeCustomIds = new Set(
+            current.customCompanies.map((company) => company.id),
+          );
+          for (const company of targets) {
+            if (!activeCustomIds.has(company.id)) continue;
+            const quote = result.updates.get(company.id);
+            if (quote) {
+              quoteCache[company.id] = {
+                verifiedName: quote.name,
+                priceLocal: quote.priceLocal,
+                changePct: quote.changePct,
+                quoteDate: quote.quoteDate,
+                marketCapLocal100m: quote.marketCapLocal100m,
+                status: "fresh",
+                updatedAt,
+              };
+            } else {
+              const previous = quoteCache[company.id];
+              quoteCache[company.id] = {
+                verifiedName: previous?.verifiedName ?? null,
+                priceLocal: previous?.priceLocal ?? null,
+                changePct: previous?.changePct ?? null,
+                quoteDate: previous?.quoteDate ?? null,
+                marketCapLocal100m:
+                  previous?.marketCapLocal100m ?? null,
+                status: previous ? "stale" : "unavailable",
+                updatedAt,
+              };
+            }
+          }
+          return {
+            ...current,
+            quoteCache,
+            updatedAt,
+          };
+        });
+        return { success: result.updates.size, total: targets.length };
+      } finally {
+        setCustomQuotesRefreshing(false);
+      }
+    },
+    [],
+  );
 
   const loadDashboard = useCallback(
     async (manual = false) => {
@@ -1535,6 +1795,13 @@ export function Dashboard({
         if (!currentDataset) throw new Error("没有可供刷新的完整数据快照");
 
         const refreshed = await refreshMarketDataset(currentDataset);
+        let customRefresh = { success: 0, total: 0 };
+        try {
+          customRefresh = await refreshCustomQuotes();
+        } catch {
+          // Custom quotes are intentionally isolated: a failure must never
+          // downgrade the audited 31-company refresh.
+        }
         datasetRef.current = refreshed.dataset;
         const nextResponse = responseFromDataset(refreshed.dataset, {
           state: "fresh",
@@ -1544,9 +1811,15 @@ export function Dashboard({
           source: "live",
           lastSuccessAt: refreshed.dataset.snapshot.generated_at,
           lastAttemptAt: new Date().toISOString(),
-          message: refreshed.fxRefreshed
-            ? `实时刷新成功：${refreshed.successCount}/${refreshed.sampleCount} 家行情完整`
-            : `行情更新成功：${refreshed.successCount}/${refreshed.sampleCount} 家完整；汇率沿用 ${refreshed.dataset.snapshot.fx.date} 快照`,
+          message: `${
+            refreshed.fxRefreshed
+              ? `实时刷新成功：${refreshed.successCount}/${refreshed.sampleCount} 家基础行情完整`
+              : `基础行情更新成功：${refreshed.successCount}/${refreshed.sampleCount} 家完整；汇率沿用 ${refreshed.dataset.snapshot.fx.date} 快照`
+          }${
+            customRefresh.total
+              ? `；自定义行情 ${customRefresh.success}/${customRefresh.total}`
+              : ""
+          }`,
         });
         setResponse(nextResponse);
         setCountdown(
@@ -1585,7 +1858,7 @@ export function Dashboard({
         inFlight.current = false;
       }
     },
-    [pollIntervalSeconds],
+    [pollIntervalSeconds, refreshCustomQuotes],
   );
 
   useEffect(() => {
@@ -1608,23 +1881,82 @@ export function Dashboard({
     setCountdown(pollIntervalSeconds);
   }, [countdown, loadDashboard, pollIntervalSeconds]);
 
+  const closeWatchPool = useCallback(() => {
+    setWatchPoolOpen(false);
+  }, []);
+
   const data = response?.data;
-  const companies = useMemo(() => data?.companies ?? [], [data?.companies]);
+  const baseCompanies = useMemo(
+    () => data?.companies ?? [],
+    [data?.companies],
+  );
+  const hiddenDefaultIds = useMemo(
+    () => new Set(watchPool.hiddenDefaultIds),
+    [watchPool.hiddenDefaultIds],
+  );
+  const companies = useMemo(
+    () =>
+      baseCompanies.filter(
+        (company) => !hiddenDefaultIds.has(company.id),
+      ),
+    [baseCompanies, hiddenDefaultIds],
+  );
+  const activeDefaultIds = useMemo(
+    () => new Set(companies.map((company) => company.id)),
+    [companies],
+  );
+  const customCompanies = useMemo(
+    () =>
+      watchPool.customCompanies.map((company) =>
+        customCompanyView(
+          company,
+          watchPool.quoteCache[company.id],
+          data?.fx,
+        ),
+      ),
+    [data?.fx, watchPool.customCompanies, watchPool.quoteCache],
+  );
+  const defaultWatchCompanies = useMemo<DefaultWatchCompany[]>(
+    () =>
+      baseCompanies.map((company) => ({
+        id: company.id,
+        name: company.name,
+        ticker: company.ticker,
+        group: company.group,
+        region: company.region,
+      })),
+    [baseCompanies],
+  );
   const valuations = useMemo(() => data?.valuations ?? [], [data?.valuations]);
+  const activeValuations = useMemo(
+    () =>
+      valuations.filter((valuation) => activeDefaultIds.has(valuation.id)),
+    [activeDefaultIds, valuations],
+  );
   const valuationMap = useMemo(
-    () => new Map(valuations.map((valuation) => [valuation.id, valuation])),
-    [valuations],
+    () =>
+      new Map(
+        activeValuations.map((valuation) => [valuation.id, valuation]),
+      ),
+    [activeValuations],
   );
   const groups = useMemo(
     () => [...new Set(companies.map((company) => company.group).filter(Boolean))].sort(),
     [companies],
   );
   const regions = useMemo(
-    () => [...new Set(companies.map((company) => company.region).filter(Boolean))].sort(),
-    [companies],
+    () =>
+      [
+        ...new Set(
+          [...companies, ...customCompanies]
+            .map((company) => company.region)
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [companies, customCompanies],
   );
 
-  const visibleCompanies = useMemo(() => {
+  const visibleDefaultCompanies = useMemo(() => {
     const filtered = companies.filter(
       (company) =>
         (group === "全部" || company.group === group) &&
@@ -1642,14 +1974,74 @@ export function Dashboard({
     });
   }, [companies, group, query, region, sortDirection, sortKey, valuationMap]);
 
+  const visibleCustomCompanies = useMemo(() => {
+    if (group !== "全部") return [];
+    const filtered = customCompanies.filter(
+      (company) =>
+        (region === "全部" || company.region === region) &&
+        textIncludes(company, query),
+    );
+    return [...filtered].sort((left, right) => {
+      const leftValue = toSortValue(left, undefined, sortKey);
+      const rightValue = toSortValue(right, undefined, sortKey);
+      const direction = sortDirection === "desc" ? -1 : 1;
+      if (typeof leftValue === "string" && typeof rightValue === "string") {
+        return leftValue.localeCompare(rightValue, "zh-CN") * direction;
+      }
+      return ((leftValue as number) - (rightValue as number)) * direction;
+    });
+  }, [
+    customCompanies,
+    group,
+    query,
+    region,
+    sortDirection,
+    sortKey,
+  ]);
+
+  const visibleCompanies = useMemo(() => {
+    if (activeTab !== "core" && activeTab !== "sources") {
+      return visibleDefaultCompanies;
+    }
+    return [...visibleDefaultCompanies, ...visibleCustomCompanies].sort(
+      (left, right) => {
+        const leftValue = toSortValue(
+          left,
+          valuationMap.get(left.id),
+          sortKey,
+        );
+        const rightValue = toSortValue(
+          right,
+          valuationMap.get(right.id),
+          sortKey,
+        );
+        const direction = sortDirection === "desc" ? -1 : 1;
+        if (
+          typeof leftValue === "string" &&
+          typeof rightValue === "string"
+        ) {
+          return (
+            leftValue.localeCompare(rightValue, "zh-CN") * direction
+          );
+        }
+        return ((leftValue as number) - (rightValue as number)) * direction;
+      },
+    );
+  }, [
+    activeTab,
+    sortDirection,
+    sortKey,
+    valuationMap,
+    visibleCustomCompanies,
+    visibleDefaultCompanies,
+  ]);
+
   const visibleValuations = useMemo(() => {
-    const allowed = new Set(visibleCompanies.map((company) => company.id));
-    return valuations
-      .filter(
-        (valuation) =>
-          allowed.has(valuation.id) ||
-          ((!companies.length || query) && textIncludes(valuation, query)),
-      )
+    const allowed = new Set(
+      visibleDefaultCompanies.map((company) => company.id),
+    );
+    return activeValuations
+      .filter((valuation) => allowed.has(valuation.id))
       .sort((left, right) => {
         const leftCompany =
           companies.find((company) => company.id === left.id) ??
@@ -1679,7 +2071,32 @@ export function Dashboard({
         }
         return ((leftValue as number) - (rightValue as number)) * direction;
       });
-  }, [companies, query, sortDirection, sortKey, valuations, visibleCompanies]);
+  }, [
+    activeValuations,
+    companies,
+    sortDirection,
+    sortKey,
+    visibleDefaultCompanies,
+  ]);
+
+  const scopedEvents = useMemo(
+    () =>
+      scopeRowsToActiveCompanies(
+        data?.events ?? [],
+        baseCompanies,
+        activeDefaultIds,
+      ),
+    [activeDefaultIds, baseCompanies, data?.events],
+  );
+  const scopedHistory = useMemo(
+    () =>
+      scopeRowsToActiveCompanies(
+        data?.history ?? [],
+        baseCompanies,
+        activeDefaultIds,
+      ),
+    [activeDefaultIds, baseCompanies, data?.history],
+  );
 
   const handleSort = (next: SortKey) => {
     if (next === sortKey) {
@@ -1710,15 +2127,18 @@ export function Dashboard({
     });
   };
 
-  const aShareCount = companies.filter((company) => company.region === "A股").length;
-  const successCount =
-    asNumber(data?.summary?.completeCoreCount) ??
-    companies.filter((company) => asString(company.coreStatus).toUpperCase() === "OK").length;
-  const sampleCount = asNumber(data?.summary?.companyCount) ?? companies.length;
-  const hotCount = valuations.filter(
+  const aShareCount =
+    companies.filter((company) => company.region === "A股").length +
+    customCompanies.filter((company) => company.region === "A股").length;
+  const observedCount = companies.length + customCompanies.length;
+  const successCount = companies.filter(
+    (company) => asString(company.coreStatus).toUpperCase() === "OK",
+  ).length;
+  const sampleCount = companies.length;
+  const hotCount = activeValuations.filter(
     (valuation) => (asNumber(valuation.temperatureScore) ?? 0) >= 85,
   ).length;
-  const coldCount = valuations.filter(
+  const coldCount = activeValuations.filter(
     (valuation) => (asNumber(valuation.temperatureScore) ?? 100) <= 30,
   ).length;
   const interval = Math.max(
@@ -1735,12 +2155,12 @@ export function Dashboard({
       : "";
   const status = response?.status;
   const resultCount =
-    activeTab === "valuation"
+    activeTab === "overview" || activeTab === "valuation"
       ? visibleValuations.length
       : activeTab === "events"
-        ? (data?.events ?? []).filter((row) => textIncludes(row, query)).length
+        ? scopedEvents.filter((row) => textIncludes(row, query)).length
         : activeTab === "history"
-          ? (data?.history ?? []).filter((row) => textIncludes(row, query)).length
+          ? scopedHistory.filter((row) => textIncludes(row, query)).length
           : visibleCompanies.length;
 
   if (isLoading && !response) {
@@ -1780,6 +2200,22 @@ export function Dashboard({
           </div>
         </div>
         <div className="update-controls">
+          <button
+            className="watch-pool-button"
+            type="button"
+            onClick={() => setWatchPoolOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={watchPoolOpen}
+          >
+            <span aria-hidden="true">◎</span>
+            <span>
+              观察池
+              <small>
+                默认 {companies.length}/{baseCompanies.length} · 自定义{" "}
+                {customCompanies.length}
+              </small>
+            </span>
+          </button>
           <div className="auto-update">
             <span className="pulse-dot" aria-hidden="true" />
             <span>
@@ -1818,6 +2254,7 @@ export function Dashboard({
           <span>估值基准日 {data?.asOf || "—"}</span>
           <span>行情日 {quoteDates || "—"}</span>
           <span>汇率日 {getFxDate(data?.fx) || "—"}</span>
+          <span>财务 每日自动校验</span>
           <span>自动检查 {Math.round(interval / 60)} 分钟</span>
         </div>
       </div>
@@ -1849,8 +2286,9 @@ export function Dashboard({
             <p className="eyebrow">实时研究底稿</p>
             <h2 id="overview-title">把估值位置、经营效率与证据链放在同一张图上</h2>
             <p>
-              当前覆盖 {companies.length || 31} 家公司，其中 A股 {aShareCount || 15} 家。
-              行情使用最新交易日，经营数据以最近完整年报为主。
+              当前观察 {observedCount} 家公司（默认 {companies.length}/
+              {baseCompanies.length}，自定义 {customCompanies.length}），其中 A股{" "}
+              {aShareCount} 家。自定义公司仅展示可验证行情，不进入财务、估值和同业统计。
             </p>
           </div>
           <div className="coverage-seal">
@@ -1865,16 +2303,14 @@ export function Dashboard({
         <section className="metric-grid" aria-label="系统概览指标">
           <MetricCard
             label="覆盖公司"
-            value={`${companies.length || 31} 家`}
-            detail={`A股 ${aShareCount || 15} 家 · 全球参考 ${
-              Math.max(0, companies.length - aShareCount) || 16
-            } 家`}
+            value={`${observedCount} 家`}
+            detail={`默认 ${companies.length} 家 · 自定义 ${customCompanies.length} 家`}
             tone="blue"
           />
           <MetricCard
             label="重点估值"
-            value={`${valuations.length || aShareCount || 15} 家`}
-            detail="A股重点观察公司"
+            value={`${activeValuations.length} 家`}
+            detail="仅默认池内可审计公司"
             tone="sky"
           />
           <MetricCard
@@ -1885,13 +2321,16 @@ export function Dashboard({
           />
           <MetricCard
             label="可比行业"
-            value={`${groups.length || 5} 组`}
-            detail="A股与全球同组双锚"
+            value={`${groups.length} 组`}
+            detail="仅默认池参与同业统计"
             tone="green"
           />
         </section>
 
-        <OverviewCharts companies={companies} valuations={valuations} />
+        <OverviewCharts
+          companies={companies}
+          valuations={activeValuations}
+        />
 
         <div className="workspace-grid">
           <section
@@ -2016,7 +2455,7 @@ export function Dashboard({
                   title="可比组统计"
                   description="分别观察A股样本和全球参考，表内展示当前筛选范围的中位数。"
                 />
-                <PeerTable companies={visibleCompanies} />
+                <PeerTable companies={visibleDefaultCompanies} />
               </>
             ) : null}
 
@@ -2027,7 +2466,7 @@ export function Dashboard({
                   title="事件跟踪"
                   description="记录事实、影响变量、证据来源和下一步验证，避免只保留结论。"
                 />
-                <EventsTable rows={data?.events ?? []} query={query} />
+                <EventsTable rows={scopedEvents} query={query} />
               </>
             ) : null}
 
@@ -2038,7 +2477,7 @@ export function Dashboard({
                   title="历史记录"
                   description="每次成功更新保留当日关键估值与经营指标，支持后续对比。"
                 />
-                <HistoryTable rows={data?.history ?? []} query={query} />
+                <HistoryTable rows={scopedHistory} query={query} />
               </>
             ) : null}
 
@@ -2082,6 +2521,19 @@ export function Dashboard({
             : "本页打开期间每 5 分钟检查一次"}
         </p>
       </footer>
+
+      <WatchPoolManager
+        open={watchPoolOpen}
+        defaultCompanies={defaultWatchCompanies}
+        state={watchPool}
+        storageWarning={storageWarning}
+        customQuotesRefreshing={customQuotesRefreshing}
+        onClose={closeWatchPool}
+        onChange={setWatchPool}
+        onRefreshCustom={(selected) => {
+          void refreshCustomQuotes(selected);
+        }}
+      />
     </div>
   );
 }

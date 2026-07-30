@@ -38,7 +38,10 @@ export interface CompanySnapshot {
   shares_million: MaybeNumber;
   market_cap_local_100m: MaybeNumber;
   quote_market_cap_check_100m: MaybeNumber;
+  /** Legacy quote-currency alias retained for older snapshots and clients. */
   currency: string;
+  quote_currency?: string;
+  financial_currency?: string;
   structured_source: string;
   report_period: string;
   report_date: string;
@@ -61,7 +64,10 @@ export interface CompanySnapshot {
   financial_source_generated_at?: string;
   quote_source?: string;
   quote_status?: string;
+  /** Legacy quote-FX alias retained for older snapshots and clients. */
   fx_to_cny: MaybeNumber;
+  quote_fx_to_cny?: MaybeNumber;
+  financial_fx_to_cny?: MaybeNumber;
   data_quality_score: MaybeNumber;
   [key: string]: unknown;
 }
