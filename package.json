@@ -1,0 +1,37 @@
+{
+  "name": "ken-tech-valuation-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "prebuild": "npm run sync:static",
+    "build": "next build",
+    "test": "npm run build && node --test tests/static-export.test.mjs",
+    "check": "tsc --noEmit",
+    "sync:static": "tsx scripts/refresh-static-data.ts --copy",
+    "refresh:static": "tsx scripts/refresh-static-data.ts --refresh"
+  },
+  "dependencies": {
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "tailwindcss": "4.2.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "esbuild": "0.28.1",
+    "postcss": "8.5.25",
+    "sharp": "0.35.3"
+  },
+  "type": "module"
+}

@@ -1,0 +1,16 @@
+/node_modules/
+/.next/
+/dist/
+/.vinext/
+/.openai/
+/.wrangler/
+/out/
+/coverage/
+/.env*
+/.dev.vars*
+*.log
+*.sqlite*
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
+wrangler.public.jsonc
