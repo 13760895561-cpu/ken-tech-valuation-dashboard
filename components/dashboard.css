@@ -2152,6 +2152,10 @@
   color: var(--dash-yellow-500);
 }
 
+.quote-state.is-partial {
+  color: var(--dash-yellow-500);
+}
+
 .quote-state.is-unavailable {
   color: var(--dash-muted);
 }

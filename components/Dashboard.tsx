@@ -10,20 +10,32 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { DashboardDataset } from "@/lib/dashboard-types";
+import {
+  fetchCustomFinancials,
+  type CustomFinancialSnapshot as FetchedCustomFinancialSnapshot,
+} from "@/lib/custom-financials";
+import {
+  customFinancialCacheNeedsRefresh,
+  mergeCustomFinancialRefresh,
+} from "@/lib/custom-financial-cache";
+import type {
+  CompanySnapshot,
+  DashboardDataset,
+} from "@/lib/dashboard-types";
 import type { DashboardExcelExportInput } from "@/lib/excel-export";
 import {
   TENCENT_QUOTE_SOURCE,
   fetchCustomQuoteUpdates,
   refreshMarketDataset,
 } from "@/lib/market-refresh";
-import { buildDashboardData } from "@/lib/model";
+import { buildDashboardData, deriveCompanies } from "@/lib/model";
 import {
   WATCH_POOL_STORAGE_KEY,
   emptyWatchPoolState,
   loadWatchPool,
   saveWatchPool,
   sanitizeWatchPoolState,
+  type CustomFinancialSnapshot as CachedCustomFinancialSnapshot,
   type CustomQuoteSnapshot,
   type CustomWatchCompany,
   type WatchPoolState,
@@ -976,7 +988,9 @@ function CoreTable({
                   <strong>{company.name}</strong>
                   {company.trackingOrigin === "custom" ? (
                     <small className="custom-company-badge">
-                      用户添加 · 仅行情
+                      {company.report_period
+                        ? `用户添加 · ${company.report_period}`
+                        : "用户添加 · 财务待补全"}
                     </small>
                   ) : (
                     <small>{company.report_period || "报告期未标注"}</small>
@@ -1017,8 +1031,19 @@ function CoreTable({
                   <span>{formatNumber(company.marketCapPerEmployeeCny10k, 1)}</span>
                 </td>
                 <td className="number-cell paired-value">
-                  <span>{formatNumber(company.evSales, 2)}x</span>
-                  <span>{formatNumber(company.pe, 2)}x</span>
+                  <span>
+                    {asNumber(company.evSales) === null
+                      ? "—"
+                      : `${formatNumber(company.evSales, 2)}x`}
+                  </span>
+                  <span>
+                    {asNumber(company.pe) === null
+                      ? asNumber(company.netProfitCny100m) !== null &&
+                        (asNumber(company.netProfitCny100m) ?? 0) <= 0
+                        ? "亏损不适用"
+                        : "—"
+                      : `${formatNumber(company.pe, 2)}x`}
+                  </span>
                 </td>
                 <td>
                   <span
@@ -1032,7 +1057,11 @@ function CoreTable({
                   </span>
                   <span
                     className={`status-chip ${
-                      asString(company.valuationInputStatus).toUpperCase() === "OK"
+                      asString(company.valuationInputStatus).toUpperCase() ===
+                        "OK" ||
+                      asString(company.valuationInputStatus).includes(
+                        "指标完整",
+                      )
                         ? "is-success"
                         : "is-warning"
                     }`}
@@ -1434,9 +1463,85 @@ function getFxDate(fx: UnknownRecord | undefined): string {
   return asString(firstValue(fx ?? {}, ["date", "fxDate", "asOf"]));
 }
 
+function supportsAutomaticFinancials(
+  company: CustomWatchCompany,
+): company is CustomWatchCompany & { market: "A" | "HK" | "US" } {
+  return (
+    company.market === "A" ||
+    company.market === "HK" ||
+    company.market === "US"
+  );
+}
+
+function cachedFinancialSnapshot(
+  snapshot: FetchedCustomFinancialSnapshot,
+): CachedCustomFinancialSnapshot {
+  const currencyVerified = Boolean(snapshot.financialCurrency);
+  return {
+    reportPeriod: snapshot.reportPeriod,
+    reportDate: snapshot.reportDate,
+    noticeDate: snapshot.noticeDate,
+    financialCurrency: snapshot.financialCurrency,
+    revenueLocal100m: snapshot.revenueLocal100m,
+    grossProfitLocal100m: snapshot.grossProfitLocal100m,
+    netProfitLocal100m: snapshot.netProfitLocal100m,
+    ocfLocal100m: snapshot.ocfLocal100m,
+    capexLocal100m: snapshot.capexLocal100m,
+    cashLocal100m: snapshot.cashLocal100m,
+    debtLocal100m: snapshot.debtLocal100m,
+    employees: snapshot.employees,
+    revenueGrowth: snapshot.revenueGrowth,
+    grossMargin: snapshot.grossMargin,
+    netMargin: snapshot.netMargin,
+    roic: snapshot.roic,
+    structuredSource: snapshot.structuredSource,
+    status:
+      snapshot.status === "fresh" && !currencyVerified
+        ? "partial"
+        : snapshot.status,
+    message: currencyVerified
+      ? snapshot.message
+      : `${snapshot.message}；财务币种缺失，人民币派生指标暂停计算`,
+    errors: snapshot.errors,
+    updatedAt: snapshot.updatedAt,
+    dataQualityScore: snapshot.dataQualityScore,
+  };
+}
+
+function unavailableCachedFinancialSnapshot(
+  updatedAt: string,
+  message = "本次财务数据请求未完成",
+): CachedCustomFinancialSnapshot {
+  return {
+    reportPeriod: null,
+    reportDate: null,
+    noticeDate: null,
+    financialCurrency: null,
+    revenueLocal100m: null,
+    grossProfitLocal100m: null,
+    netProfitLocal100m: null,
+    ocfLocal100m: null,
+    capexLocal100m: null,
+    cashLocal100m: null,
+    debtLocal100m: null,
+    employees: null,
+    revenueGrowth: null,
+    grossMargin: null,
+    netMargin: null,
+    roic: null,
+    structuredSource: null,
+    status: "unavailable",
+    message,
+    errors: [message],
+    updatedAt,
+    dataQualityScore: 0,
+  };
+}
+
 function customCompanyView(
   company: CustomWatchCompany,
   quote: CustomQuoteSnapshot | undefined,
+  financial: CachedCustomFinancialSnapshot | undefined,
   fx: UnknownRecord | undefined,
 ): DashboardCompany {
   const rates =
@@ -1445,55 +1550,80 @@ function customCompanyView(
     !Array.isArray(fx.rates_to_cny)
       ? (fx.rates_to_cny as UnknownRecord)
       : {};
-  const fxToCny =
+  const quoteFxToCny =
     company.currency === "CNY"
       ? 1
       : asNumber(rates[company.currency]);
-  const marketCapCny =
-    quote?.marketCapLocal100m !== null &&
-    quote?.marketCapLocal100m !== undefined &&
-    fxToCny !== null
-      ? quote.marketCapLocal100m * fxToCny
-      : null;
-  return {
+  const financialCurrency =
+    financial?.financialCurrency || "UNVERIFIED";
+  const financialFxToCny =
+    financialCurrency === "CNY"
+      ? 1
+      : financial?.financialCurrency
+        ? asNumber(rates[financialCurrency])
+        : null;
+  const snapshot: CompanySnapshot = {
     id: company.id,
     name: company.name,
     ticker: company.ticker,
+    market: company.market,
+    quote_code: company.quoteCode ?? "",
+    financial_symbol: company.ticker,
     group: "自定义观察",
     region: company.region,
-    market: company.market,
-    role: "用户自定义（仅行情）",
-    currency: company.currency,
+    role: "用户自定义（行情+自动财务）",
+    include_in_stats: false,
+    name_quote: quote?.verifiedName ?? company.name,
     price_local: quote?.priceLocal ?? null,
+    prev_close_local: null,
     change_pct: quote?.changePct ?? null,
-    quote_date: quote?.quoteDate ?? null,
-    report_period: null,
-    report_date: null,
-    employees: null,
-    currentMarketCapCny100m: marketCapCny,
-    revenueCny100m: null,
-    grossProfitCny100m: null,
-    netProfitCny100m: null,
-    fcfCny100m: null,
-    enterpriseValueCny100m: null,
-    revenuePerEmployeeCny10k: null,
-    grossProfitPerEmployeeCny10k: null,
-    netProfitPerEmployeeCny10k: null,
-    marketCapPerEmployeeCny10k: null,
-    ps: null,
-    priceToGrossProfit: null,
-    evSales: null,
-    evGrossProfit: null,
-    pe: null,
-    pFcf: null,
-    fcfYield: null,
-    coreStatus: quote?.status === "fresh" ? "仅行情" : "行情待核验",
-    valuationInputStatus: "不参与估值",
+    quote_date: quote?.quoteDate ?? "",
+    shares_million: null,
+    market_cap_local_100m: quote?.marketCapLocal100m ?? null,
+    quote_market_cap_check_100m: quote?.marketCapLocal100m ?? null,
+    currency: company.currency,
+    quote_currency: company.currency,
+    financial_currency: financialCurrency,
+    structured_source: financial?.structuredSource ?? "",
+    report_period: financial?.reportPeriod ?? "",
+    report_date: financial?.reportDate ?? "",
+    notice_date: financial?.noticeDate ?? "",
+    revenue_local_100m: financial?.revenueLocal100m ?? null,
+    gross_profit_local_100m: financial?.grossProfitLocal100m ?? null,
+    net_profit_local_100m: financial?.netProfitLocal100m ?? null,
+    revenue_growth: financial?.revenueGrowth ?? null,
+    gross_margin: financial?.grossMargin ?? null,
+    net_margin: financial?.netMargin ?? null,
+    roic: financial?.roic ?? null,
+    employees: financial?.employees ?? null,
+    official_report_source: "",
+    ocf_local_100m: financial?.ocfLocal100m ?? null,
+    capex_local_100m: financial?.capexLocal100m ?? null,
+    cash_local_100m: financial?.cashLocal100m ?? null,
+    debt_local_100m: financial?.debtLocal100m ?? null,
+    errors: financial?.errors ?? [],
+    financial_refresh_status: financial?.status ?? "unavailable",
+    financial_source_generated_at: financial?.updatedAt ?? "",
     quote_source: company.quoteCode
       ? `${TENCENT_QUOTE_SOURCE}q=${company.quoteCode}`
-      : null,
-    official_report_source: null,
-    structured_source: null,
+      : "",
+    quote_status: quote?.status ?? "unavailable",
+    fx_to_cny: quoteFxToCny,
+    quote_fx_to_cny: quoteFxToCny,
+    financial_fx_to_cny: financialFxToCny,
+    data_quality_score: financial?.dataQualityScore ?? null,
+  };
+  const derived = deriveCompanies([snapshot])[0];
+  const inputsComplete =
+    derived.coreStatus === "OK" &&
+    derived.valuationInputStatus === "OK";
+  return {
+    ...derived,
+    financial_currency: financial?.financialCurrency ?? null,
+    role: "用户自定义（行情+自动财务）",
+    valuationInputStatus: inputsComplete
+      ? "指标完整·未入模型"
+      : "部分·未入模型",
     trackingOrigin: "custom",
     customNote: company.note || null,
   };
@@ -1564,6 +1694,7 @@ export function Dashboard({
     useState<ExcelExportState>("idle");
   const [excelExportMessage, setExcelExportMessage] = useState("");
   const inFlight = useRef(false);
+  const customRefreshInFlight = useRef(false);
   const datasetRef = useRef<DashboardDataset | null>(initialDataset ?? null);
   const lastManualAttemptRef = useRef(0);
   const watchPoolRef = useRef<WatchPoolState>(watchPool);
@@ -1627,29 +1758,90 @@ export function Dashboard({
   }, [defaultCompanyIds]);
 
   const refreshCustomQuotes = useCallback(
-    async (selected?: CustomWatchCompany[]) => {
-      const targets = (
-        selected ?? watchPoolRef.current.customCompanies
-      ).filter((company) => company.quoteCode);
-      if (!targets.length) return { success: 0, total: 0 };
+    async (
+      selected?: CustomWatchCompany[],
+      forceFinancial = false,
+    ) => {
+      if (customRefreshInFlight.current) {
+        return {
+          quoteSuccess: 0,
+          quoteTotal: 0,
+          financialSuccess: 0,
+          financialPartial: 0,
+          financialTotal: 0,
+        };
+      }
+      const targets = selected ?? watchPoolRef.current.customCompanies;
+      const quoteTargets = targets.filter((company) => company.quoteCode);
+      const now = Date.now();
+      const financialTargets = targets
+        .filter(supportsAutomaticFinancials)
+        .filter(
+          (company) =>
+            forceFinancial ||
+            customFinancialCacheNeedsRefresh(
+              watchPoolRef.current.financialCache[company.id],
+              now,
+            ),
+        );
+      if (!quoteTargets.length && !financialTargets.length) {
+        return {
+          quoteSuccess: 0,
+          quoteTotal: 0,
+          financialSuccess: 0,
+          financialPartial: 0,
+          financialTotal: 0,
+        };
+      }
+      customRefreshInFlight.current = true;
       setCustomQuotesRefreshing(true);
       try {
-        const result = await fetchCustomQuoteUpdates(
-          targets.map((company) => ({
-            id: company.id,
-            name: company.name,
-            quoteCode: company.quoteCode ?? "",
-          })),
-        );
+        const [quoteResult, financialResult] = await Promise.allSettled([
+          quoteTargets.length
+            ? fetchCustomQuoteUpdates(
+                quoteTargets.map((company) => ({
+                  id: company.id,
+                  name: company.name,
+                  quoteCode: company.quoteCode ?? "",
+                })),
+              )
+            : Promise.resolve(null),
+          financialTargets.length
+            ? fetchCustomFinancials(
+                financialTargets.map((company) => ({
+                  id: company.id,
+                  name: company.name,
+                  ticker: company.ticker,
+                  market: company.market,
+                  quoteCode: company.quoteCode,
+                })),
+              )
+            : Promise.resolve([]),
+        ]);
         const updatedAt = new Date().toISOString();
+        const quoteUpdates =
+          quoteResult.status === "fulfilled" && quoteResult.value
+            ? quoteResult.value.updates
+            : new Map();
+        const fetchedFinancials =
+          financialResult.status === "fulfilled"
+            ? financialResult.value
+            : [];
+        const financialUpdates = new Map(
+          financialTargets.map((company, index) => [
+            company.id,
+            fetchedFinancials[index],
+          ]),
+        );
         setWatchPool((current) => {
           const quoteCache = { ...current.quoteCache };
+          const financialCache = { ...current.financialCache };
           const activeCustomIds = new Set(
             current.customCompanies.map((company) => company.id),
           );
-          for (const company of targets) {
+          for (const company of quoteTargets) {
             if (!activeCustomIds.has(company.id)) continue;
-            const quote = result.updates.get(company.id);
+            const quote = quoteUpdates.get(company.id);
             if (quote) {
               quoteCache[company.id] = {
                 verifiedName: quote.name,
@@ -1674,14 +1866,48 @@ export function Dashboard({
               };
             }
           }
+          for (const company of financialTargets) {
+            if (!activeCustomIds.has(company.id)) continue;
+            const fetched = financialUpdates.get(company.id);
+            const previous = financialCache[company.id];
+            if (!fetched) {
+              financialCache[company.id] = mergeCustomFinancialRefresh(
+                previous,
+                unavailableCachedFinancialSnapshot(updatedAt),
+              );
+              continue;
+            }
+            const next = cachedFinancialSnapshot(fetched);
+            financialCache[company.id] = mergeCustomFinancialRefresh(
+              previous,
+              next,
+            );
+          }
           return {
             ...current,
             quoteCache,
+            financialCache,
             updatedAt,
           };
         });
-        return { success: result.updates.size, total: targets.length };
+        return {
+          quoteSuccess: quoteUpdates.size,
+          quoteTotal: quoteTargets.length,
+          financialSuccess: fetchedFinancials.filter(
+            (snapshot) =>
+              snapshot.status === "fresh" &&
+              Boolean(snapshot.financialCurrency),
+          ).length,
+          financialPartial: fetchedFinancials.filter(
+            (snapshot) =>
+              snapshot.status === "partial" ||
+              (snapshot.status === "fresh" &&
+                !snapshot.financialCurrency),
+          ).length,
+          financialTotal: financialTargets.length,
+        };
       } finally {
+        customRefreshInFlight.current = false;
         setCustomQuotesRefreshing(false);
       }
     },
@@ -1737,12 +1963,33 @@ export function Dashboard({
         if (!currentDataset) throw new Error("没有可供刷新的完整数据快照");
 
         const refreshed = await refreshMarketDataset(currentDataset);
-        let customRefresh = { success: 0, total: 0 };
+        let customRefresh = {
+          quoteSuccess: 0,
+          quoteTotal: 0,
+          financialSuccess: 0,
+          financialPartial: 0,
+          financialTotal: 0,
+        };
         try {
-          customRefresh = await refreshCustomQuotes();
+          customRefresh = await refreshCustomQuotes(undefined, manual);
         } catch {
-          // Custom quotes are intentionally isolated: a failure must never
+          // Custom companies are intentionally isolated: a failure must never
           // downgrade the audited 31-company refresh.
+        }
+        const customMessages: string[] = [];
+        if (customRefresh.quoteTotal) {
+          customMessages.push(
+            `自定义行情 ${customRefresh.quoteSuccess}/${customRefresh.quoteTotal}`,
+          );
+        }
+        if (customRefresh.financialTotal) {
+          customMessages.push(
+            `自定义财务完整 ${customRefresh.financialSuccess}/${customRefresh.financialTotal}${
+              customRefresh.financialPartial
+                ? `，部分 ${customRefresh.financialPartial}`
+                : ""
+            }`,
+          );
         }
         datasetRef.current = refreshed.dataset;
         const nextResponse = responseFromDataset(refreshed.dataset, {
@@ -1757,11 +2004,7 @@ export function Dashboard({
             refreshed.fxRefreshed
               ? `实时刷新成功：${refreshed.successCount}/${refreshed.sampleCount} 家基础行情完整`
               : `基础行情更新成功：${refreshed.successCount}/${refreshed.sampleCount} 家完整；汇率沿用 ${refreshed.dataset.snapshot.fx.date} 快照`
-          }${
-            customRefresh.total
-              ? `；自定义行情 ${customRefresh.success}/${customRefresh.total}`
-              : ""
-          }`,
+          }${customMessages.length ? `；${customMessages.join("；")}` : ""}`,
         });
         setResponse(nextResponse);
         setCountdown(
@@ -1804,11 +2047,12 @@ export function Dashboard({
   );
 
   useEffect(() => {
+    if (!watchPoolLoaded) return;
     const timer = window.setTimeout(() => {
       void loadDashboard(false);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadDashboard]);
+  }, [loadDashboard, watchPoolLoaded]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1853,10 +2097,16 @@ export function Dashboard({
         customCompanyView(
           company,
           watchPool.quoteCache[company.id],
+          watchPool.financialCache[company.id],
           data?.fx,
         ),
       ),
-    [data?.fx, watchPool.customCompanies, watchPool.quoteCache],
+    [
+      data?.fx,
+      watchPool.customCompanies,
+      watchPool.financialCache,
+      watchPool.quoteCache,
+    ],
   );
   const defaultWatchCompanies = useMemo<DefaultWatchCompany[]>(
     () =>
@@ -2323,7 +2573,8 @@ export function Dashboard({
             <p>
               当前观察 {observedCount} 家公司（默认 {companies.length}/
               {baseCompanies.length}，自定义 {customCompanies.length}），其中 A股{" "}
-              {aShareCount} 家。自定义公司仅展示可验证行情，不进入财务、估值和同业统计。
+              {aShareCount} 家。A/HK/US 自定义公司会自动补全最近完整年报和自身倍数，
+              但不自动进入模型估值或可比组统计。
             </p>
           </div>
           <div className="coverage-seal">
@@ -2565,8 +2816,8 @@ export function Dashboard({
         customQuotesRefreshing={customQuotesRefreshing}
         onClose={closeWatchPool}
         onChange={setWatchPool}
-        onRefreshCustom={(selected) => {
-          void refreshCustomQuotes(selected);
+        onRefreshCustom={(selected, forceFinancial) => {
+          void refreshCustomQuotes(selected, forceFinancial);
         }}
       />
     </div>

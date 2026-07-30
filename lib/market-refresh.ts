@@ -14,6 +14,8 @@ import type {
 export const TENCENT_QUOTE_SOURCE = "https://qt.gtimg.cn/";
 const FX_SOURCE =
   "https://api.frankfurter.dev/v1/latest?base=USD&symbols=CNY,HKD";
+const TENCENT_FX_SOURCE =
+  "https://qt.gtimg.cn/q=whEURCNY,whTWDCNY,whCNYJPY,whGBPCNY,whSGDCNY";
 
 interface QuoteInstrument {
   id: string;
@@ -102,6 +104,34 @@ function decodeTencent(buffer: ArrayBuffer): string {
     // retained if the decoded quote name is damaged.
     return new TextDecoder().decode(buffer);
   }
+}
+
+export function parseTencentFxRates(
+  text: string,
+): Record<string, number> {
+  const rates: Record<string, number> = {};
+  const mapping: Record<
+    string,
+    { currency: string; inverse?: boolean }
+  > = {
+    whEURCNY: { currency: "EUR" },
+    whTWDCNY: { currency: "TWD" },
+    whCNYJPY: { currency: "JPY", inverse: true },
+    whGBPCNY: { currency: "GBP" },
+    whSGDCNY: { currency: "SGD" },
+  };
+  const pattern = /v_([A-Za-z0-9._-]+)="(.*?)";/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    const definition = mapping[match[1]];
+    if (!definition) continue;
+    const current = finiteNumber(match[2].split("~")[3]);
+    if (current === null || current <= 0) continue;
+    rates[definition.currency] = definition.inverse
+      ? 1 / current
+      : current;
+  }
+  return rates;
 }
 
 function parseQuoteDate(value: string): string | null {
@@ -239,7 +269,22 @@ export async function fetchCustomQuoteUpdates(
 }
 
 async function fetchFx(): Promise<FxSnapshot> {
-  const response = await fetchWithRetry(FX_SOURCE, "Frankfurter汇率");
+  const [response, supplementalRates] = await Promise.all([
+    fetchWithRetry(FX_SOURCE, "Frankfurter汇率"),
+    (async () => {
+      try {
+        const supplementalResponse = await fetchWithRetry(
+          TENCENT_FX_SOURCE,
+          "腾讯补充汇率",
+        );
+        return parseTencentFxRates(
+          decodeTencent(await supplementalResponse.arrayBuffer()),
+        );
+      } catch {
+        return {};
+      }
+    })(),
+  ]);
   const payload = (await response.json()) as {
     date?: string;
     rates?: { CNY?: number; HKD?: number };
@@ -256,6 +301,7 @@ async function fetchFx(): Promise<FxSnapshot> {
       CNY: 1,
       USD: usdCny,
       HKD: usdCny / usdHkd,
+      ...supplementalRates,
     },
     status: "ok",
   };

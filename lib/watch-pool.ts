@@ -8,6 +8,11 @@ export const MAX_IMPORT_BYTES = 512 * 1024;
 
 export type CustomMarket = "A" | "HK" | "US" | "OTHER";
 export type CustomQuoteStatus = "fresh" | "stale" | "unavailable";
+export type CustomFinancialStatus =
+  | "fresh"
+  | "partial"
+  | "stale"
+  | "unavailable";
 
 export interface CustomWatchCompany {
   id: string;
@@ -31,11 +36,44 @@ export interface CustomQuoteSnapshot {
   updatedAt: string;
 }
 
+/**
+ * Locally cached financial facts for a custom watch-list company.
+ *
+ * This intentionally mirrors only the fields needed by the dashboard. The
+ * cache is reconstructed through a strict allowlist before it is trusted, and
+ * is never included in watch-pool exports or sync codes.
+ */
+export interface CustomFinancialSnapshot {
+  reportPeriod: string | null;
+  reportDate: string | null;
+  noticeDate: string | null;
+  financialCurrency: string | null;
+  revenueLocal100m: number | null;
+  grossProfitLocal100m: number | null;
+  netProfitLocal100m: number | null;
+  ocfLocal100m: number | null;
+  capexLocal100m: number | null;
+  cashLocal100m: number | null;
+  debtLocal100m: number | null;
+  employees: number | null;
+  revenueGrowth: number | null;
+  grossMargin: number | null;
+  netMargin: number | null;
+  roic: number | null;
+  structuredSource: string | null;
+  status: CustomFinancialStatus;
+  message: string | null;
+  errors: string[];
+  updatedAt: string;
+  dataQualityScore: number | null;
+}
+
 export interface WatchPoolState {
   version: typeof WATCH_POOL_VERSION;
   hiddenDefaultIds: string[];
   customCompanies: CustomWatchCompany[];
   quoteCache: Record<string, CustomQuoteSnapshot>;
+  financialCache: Record<string, CustomFinancialSnapshot>;
   updatedAt: string;
 }
 
@@ -92,6 +130,7 @@ const FINANCIAL_IMPORT_FIELDS = new Set([
   "modelHigh",
   "temperatureScore",
   "confidenceScore",
+  "financialCache",
   "valuation",
   "financials",
 ]);
@@ -289,6 +328,61 @@ function sanitizeQuote(value: unknown): CustomQuoteSnapshot | null {
   };
 }
 
+export function sanitizeCustomFinancialSnapshot(
+  value: unknown,
+): CustomFinancialSnapshot | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const status = cleanText(record.status, 20);
+  if (
+    status !== "fresh" &&
+    status !== "partial" &&
+    status !== "stale" &&
+    status !== "unavailable"
+  ) {
+    return null;
+  }
+
+  const rawCurrency = cleanText(record.financialCurrency, 8).toUpperCase();
+  const quality = finiteOrNull(record.dataQualityScore);
+  const employees = finiteOrNull(record.employees);
+  const errors = Array.isArray(record.errors)
+    ? record.errors
+        .map((error) => cleanText(error, 240))
+        .filter(Boolean)
+        .slice(0, 20)
+    : [];
+
+  return {
+    reportPeriod: cleanText(record.reportPeriod, 40) || null,
+    reportDate: cleanText(record.reportDate, 20) || null,
+    noticeDate: cleanText(record.noticeDate, 20) || null,
+    financialCurrency: /^[A-Z]{3,8}$/.test(rawCurrency)
+      ? rawCurrency
+      : null,
+    revenueLocal100m: finiteOrNull(record.revenueLocal100m),
+    grossProfitLocal100m: finiteOrNull(record.grossProfitLocal100m),
+    netProfitLocal100m: finiteOrNull(record.netProfitLocal100m),
+    ocfLocal100m: finiteOrNull(record.ocfLocal100m),
+    capexLocal100m: finiteOrNull(record.capexLocal100m),
+    cashLocal100m: finiteOrNull(record.cashLocal100m),
+    debtLocal100m: finiteOrNull(record.debtLocal100m),
+    employees:
+      employees !== null && employees > 0 ? Math.trunc(employees) : null,
+    revenueGrowth: finiteOrNull(record.revenueGrowth),
+    grossMargin: finiteOrNull(record.grossMargin),
+    netMargin: finiteOrNull(record.netMargin),
+    roic: finiteOrNull(record.roic),
+    structuredSource: cleanText(record.structuredSource, 500) || null,
+    status,
+    message: cleanText(record.message, 500) || null,
+    errors,
+    updatedAt: cleanText(record.updatedAt, 40) || nowIso(),
+    dataQualityScore:
+      quality !== null && quality >= 0 && quality <= 100 ? quality : null,
+  };
+}
+
 function dedupeCustomCompanies(
   values: CustomWatchCompany[],
 ): CustomWatchCompany[] {
@@ -314,6 +408,7 @@ export function emptyWatchPoolState(): WatchPoolState {
     hiddenDefaultIds: [],
     customCompanies: [],
     quoteCache: {},
+    financialCache: {},
     updatedAt: nowIso(),
   };
 }
@@ -361,11 +456,26 @@ export function sanitizeWatchPoolState(
       if (sanitized) quoteCache[id] = sanitized;
     }
   }
+  const financialCache: Record<string, CustomFinancialSnapshot> = {};
+  if (
+    record.financialCache &&
+    typeof record.financialCache === "object" &&
+    !Array.isArray(record.financialCache)
+  ) {
+    for (const [id, snapshot] of Object.entries(
+      record.financialCache as Record<string, unknown>,
+    )) {
+      if (!allowedCustomIds.has(id)) continue;
+      const sanitized = sanitizeCustomFinancialSnapshot(snapshot);
+      if (sanitized) financialCache[id] = sanitized;
+    }
+  }
   return {
     version: WATCH_POOL_VERSION,
     hiddenDefaultIds,
     customCompanies,
     quoteCache,
+    financialCache,
     updatedAt: cleanText(record.updatedAt, 40) || nowIso(),
   };
 }
@@ -503,6 +613,7 @@ export function parseWatchPoolImport(
       hiddenDefaultIds,
       customCompanies,
       quoteCache: {},
+      financialCache: {},
       updatedAt: nowIso(),
     },
     summary: {
@@ -527,6 +638,11 @@ export function mergeWatchPoolStates(
   const quoteCache = Object.fromEntries(
     Object.entries(current.quoteCache).filter(([id]) => allowedIds.has(id)),
   );
+  const financialCache = Object.fromEntries(
+    Object.entries(current.financialCache ?? {}).filter(([id]) =>
+      allowedIds.has(id),
+    ),
+  );
   return {
     version: WATCH_POOL_VERSION,
     hiddenDefaultIds: [
@@ -537,6 +653,7 @@ export function mergeWatchPoolStates(
     ],
     customCompanies,
     quoteCache,
+    financialCache,
     updatedAt: nowIso(),
   };
 }

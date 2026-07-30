@@ -50,8 +50,37 @@ test("完整Excel导出包含九个视图、公式、可比样本和安全文本
       customNote: "绝不能进入分享文件的私人备注",
       quote_currency: "USD",
       quote_fx_to_cny: 7,
+      financial_currency: "USD",
+      financial_fx_to_cny: 7,
       price_local: 1,
-      market_cap_local_100m: 2,
+      market_cap_local_100m: 200,
+      currentMarketCapCny100m: 1_400,
+      report_period: "2025年报",
+      report_date: "2025-12-31",
+      revenue_local_100m: 10,
+      revenueCny100m: 70,
+      gross_profit_local_100m: 4,
+      grossProfitCny100m: 28,
+      net_profit_local_100m: 2,
+      netProfitCny100m: 14,
+      ocf_local_100m: 3,
+      capex_local_100m: 1,
+      fcfCny100m: 14,
+      cash_local_100m: 5,
+      cashCny100m: 35,
+      debt_local_100m: 2,
+      debtCny100m: 14,
+      enterpriseValueCny100m: 1_379,
+      employees: 1_000,
+      revenuePerEmployeeCny10k: 700,
+      grossProfitPerEmployeeCny10k: 280,
+      netProfitPerEmployeeCny10k: 140,
+      marketCapPerEmployeeCny10k: 14_000,
+      evSales: 19.7,
+      pe: 100,
+      coreStatus: "OK",
+      valuationInputStatus: "指标完整·未入模型",
+      financial_refresh_status: "fresh",
     },
   ];
   const sheets = buildDashboardWorkbookSheets(
@@ -89,6 +118,8 @@ test("完整Excel导出包含九个视图、公式、可比样本和安全文本
   const financialCurrencyColumn = coreHeaders.indexOf("财务币种");
   const marketCapColumn = coreHeaders.indexOf("市值（人民币亿元）");
   const revenueCnyColumn = coreHeaders.indexOf("营收（人民币亿元）");
+  const evSalesColumn = coreHeaders.indexOf("EV/Sales（x）");
+  const peColumn = coreHeaders.indexOf("P/E（x）");
   const tencentRow = core.find(
     (row) => cellValue(row[tickerColumn]) === "00700.HK",
   );
@@ -116,12 +147,14 @@ test("完整Excel导出包含九个视图、公式、可比样本和安全文本
     (customRow[tickerColumn] as { type?: unknown }).type,
     String,
   );
-  assert.equal(cellValue(customRow[financialCurrencyColumn]), "");
+  assert.equal(cellValue(customRow[financialCurrencyColumn]), "USD");
   assert.equal(
     cellValue(customRow[revenueCnyColumn]),
-    "",
-    "自定义仅行情公司的财务数据必须留空，不能填0",
+    70,
+    "自定义公司的自动财务及币种换算结果必须进入导出",
   );
+  assert.equal(cellValue(customRow[evSalesColumn]), 19.7);
+  assert.equal(cellValue(customRow[peColumn]), 100);
   assert.equal(
     JSON.stringify(sheets).includes("绝不能进入分享文件的私人备注"),
     false,

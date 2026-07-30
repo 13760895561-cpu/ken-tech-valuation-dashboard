@@ -10,6 +10,7 @@ import {
   mergeWatchPoolStates,
   normalizeQuoteCode,
   parseWatchPoolImport,
+  sanitizeCustomFinancialSnapshot,
   sanitizeWatchPoolState,
   serializeWatchPoolExport,
   type WatchPoolState,
@@ -224,6 +225,32 @@ test("JSON and sync-code transfers preserve only watch-pool identity fields", ()
         updatedAt: "2026-07-30T00:00:00.000Z",
       },
     },
+    financialCache: {
+      [company.id]: {
+        reportPeriod: "2026Q2",
+        reportDate: "2026-06-30",
+        noticeDate: "2026-07-30",
+        financialCurrency: "USD",
+        revenueLocal100m: 100,
+        grossProfitLocal100m: 60,
+        netProfitLocal100m: 30,
+        ocfLocal100m: 35,
+        capexLocal100m: 8,
+        cashLocal100m: 50,
+        debtLocal100m: 10,
+        employees: 1_000,
+        revenueGrowth: 0.2,
+        grossMargin: 0.6,
+        netMargin: 0.3,
+        roic: 0.25,
+        structuredSource: "https://example.com/filing",
+        status: "fresh",
+        message: "sensitive local cache",
+        errors: [],
+        updatedAt: "2026-07-30T01:00:00.000Z",
+        dataQualityScore: 96,
+      },
+    },
   };
 
   for (const transfer of [
@@ -235,7 +262,11 @@ test("JSON and sync-code transfers preserve only watch-pool identity fields", ()
     assert.equal(imported.state.customCompanies.length, 1);
     assert.equal(imported.state.customCompanies[0].ticker, "TEST");
     assert.deepEqual(imported.state.quoteCache, {});
-    assert.doesNotMatch(transfer, /priceLocal|marketCapLocal100m/);
+    assert.deepEqual(imported.state.financialCache, {});
+    assert.doesNotMatch(
+      transfer,
+      /priceLocal|marketCapLocal100m|financialCache|revenueLocal100m|sensitive local cache/,
+    );
   }
 });
 
@@ -247,6 +278,13 @@ test("import rejects foreign financial payloads by strict reconstruction", () =>
     quoteCache: {
       "custom:hostile": {
         priceLocal: 999,
+      },
+    },
+    financialCache: {
+      "custom:hostile": {
+        status: "fresh",
+        revenueLocal100m: 999,
+        modelCenter: 888,
       },
     },
     customCompanies: [
@@ -261,6 +299,7 @@ test("import rejects foreign financial payloads by strict reconstruction", () =>
         revenue: 999,
         modelCenter: 888,
         valuation: { low: 1, high: 2 },
+        financialCache: { revenueLocal100m: 999 },
       },
       {
         name: "",
@@ -278,9 +317,10 @@ test("import rejects foreign financial payloads by strict reconstruction", () =>
   assert.deepEqual(imported.state.hiddenDefaultIds, ["smic"]);
   assert.equal(imported.state.customCompanies.length, 1);
   assert.deepEqual(imported.state.quoteCache, {});
+  assert.deepEqual(imported.state.financialCache, {});
   assert.equal(imported.summary.skippedHiddenCount, 1);
   assert.equal(imported.summary.skippedCustomCount, 1);
-  assert.equal(imported.summary.discardedFinancialFieldCount, 5);
+  assert.equal(imported.summary.discardedFinancialFieldCount, 6);
 
   const reconstructed = imported.state.customCompanies[0] as unknown as Record<
     string,
@@ -292,9 +332,107 @@ test("import rejects foreign financial payloads by strict reconstruction", () =>
     "modelCenter",
     "valuation",
     "financials",
+    "financialCache",
   ]) {
     assert.equal(Object.hasOwn(reconstructed, field), false);
   }
+});
+
+test("financial cache is strictly allowlisted, custom-only, and compatible with old v1 state", () => {
+  const company = createCustomWatchCompany({
+    name: "Financial Cache Test",
+    ticker: "NVDA",
+    market: "US",
+  });
+  const rawSnapshot = {
+    reportPeriod: "FY2026",
+    reportDate: "2026-01-31",
+    noticeDate: "2026-02-25",
+    financialCurrency: "usd",
+    revenueLocal100m: 1_305.5,
+    grossProfitLocal100m: 920.25,
+    netProfitLocal100m: 700.1,
+    ocfLocal100m: 750,
+    capexLocal100m: 28.5,
+    cashLocal100m: 430,
+    debtLocal100m: 85,
+    employees: 36_000.9,
+    revenueGrowth: 0.78,
+    grossMargin: 0.705,
+    netMargin: 0.536,
+    roic: 0.92,
+    structuredSource: "https://example.com/annual-report",
+    status: "fresh",
+    message: "annual filing",
+    errors: ["", "  normalized warning  ", 7, "x".repeat(300)],
+    updatedAt: "2026-02-25T08:30:00.000Z",
+    dataQualityScore: 98,
+    sourceRecords: [{ secret: "must not persist" }],
+    modelCenter: 999,
+  };
+  const sanitizedSnapshot =
+    sanitizeCustomFinancialSnapshot(rawSnapshot);
+
+  assert.ok(sanitizedSnapshot);
+  assert.equal(sanitizedSnapshot.financialCurrency, "USD");
+  assert.equal(sanitizedSnapshot.employees, 36_000);
+  assert.deepEqual(sanitizedSnapshot.errors, [
+    "normalized warning",
+    "x".repeat(240),
+  ]);
+  assert.equal(
+    Object.hasOwn(sanitizedSnapshot as object, "sourceRecords"),
+    false,
+  );
+  assert.equal(Object.hasOwn(sanitizedSnapshot as object, "modelCenter"), false);
+  assert.equal(
+    sanitizeCustomFinancialSnapshot({ ...rawSnapshot, status: "complete" }),
+    null,
+  );
+  assert.equal(
+    sanitizeCustomFinancialSnapshot({
+      ...rawSnapshot,
+      dataQualityScore: 101,
+    })?.dataQualityScore,
+    null,
+  );
+
+  const state = sanitizeWatchPoolState(
+    {
+      version: WATCH_POOL_VERSION,
+      hiddenDefaultIds: [],
+      customCompanies: [company],
+      quoteCache: {},
+      financialCache: {
+        [company.id]: rawSnapshot,
+        orphan: rawSnapshot,
+        "custom:invalid": { ...rawSnapshot, status: "complete" },
+      },
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    },
+    DEFAULT_IDS,
+  );
+  assert.deepEqual(Object.keys(state.financialCache), [company.id]);
+  assert.equal(state.financialCache[company.id].revenueLocal100m, 1_305.5);
+  assert.equal(
+    Object.hasOwn(
+      state.financialCache[company.id] as unknown as object,
+      "sourceRecords",
+    ),
+    false,
+  );
+
+  const oldV1State = sanitizeWatchPoolState(
+    {
+      version: WATCH_POOL_VERSION,
+      hiddenDefaultIds: [],
+      customCompanies: [company],
+      quoteCache: {},
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    },
+    DEFAULT_IDS,
+  );
+  assert.deepEqual(oldV1State.financialCache, {});
 });
 
 test("sanitization and merge keep the default universe valid and custom rows deduplicated", () => {
@@ -327,6 +465,21 @@ test("sanitization and merge keep the default universe valid and custom rows ded
           status: "fresh",
         },
       },
+      financialCache: {
+        [company.id]: {
+          status: "partial",
+          financialCurrency: "HKD",
+          revenueLocal100m: 10,
+          message: "部分财务字段待补充",
+          errors: ["employees unavailable"],
+          updatedAt: "2026-07-30T00:00:00.000Z",
+          dataQualityScore: 65,
+        },
+        orphan: {
+          status: "fresh",
+          revenueLocal100m: 999,
+        },
+      },
     },
     DEFAULT_IDS,
   );
@@ -334,10 +487,12 @@ test("sanitization and merge keep the default universe valid and custom rows ded
   assert.deepEqual(incoming.hiddenDefaultIds, ["smic"]);
   assert.equal(incoming.customCompanies.length, 1);
   assert.deepEqual(Object.keys(incoming.quoteCache), [company.id]);
+  assert.deepEqual(Object.keys(incoming.financialCache), [company.id]);
+  assert.equal(incoming.financialCache[company.id].grossMargin, null);
 
   const merged = mergeWatchPoolStates(
     {
-      ...emptyWatchPoolState(),
+      ...incoming,
       hiddenDefaultIds: ["naura"],
       customCompanies: [company],
     },
@@ -349,6 +504,7 @@ test("sanitization and merge keep the default universe valid and custom rows ded
   );
   assert.deepEqual(new Set(merged.hiddenDefaultIds), new Set(["naura", "smic"]));
   assert.equal(merged.customCompanies.length, 1);
+  assert.deepEqual(Object.keys(merged.financialCache), [company.id]);
 
   const futureVersion = sanitizeWatchPoolState(
     {

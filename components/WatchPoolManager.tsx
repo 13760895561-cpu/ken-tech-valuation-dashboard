@@ -18,6 +18,7 @@ import {
   serializeWatchPoolExport,
   stateWithTimestamp,
   type CustomCompanyInput,
+  type CustomFinancialSnapshot,
   type CustomMarket,
   type CustomWatchCompany,
   type ParsedWatchPoolImport,
@@ -48,7 +49,10 @@ interface WatchPoolManagerProps {
   customQuotesRefreshing?: boolean;
   onClose: () => void;
   onChange: (next: WatchPoolState) => void;
-  onRefreshCustom: (companies?: CustomWatchCompany[]) => void;
+  onRefreshCustom: (
+    companies?: CustomWatchCompany[],
+    forceFinancial?: boolean,
+  ) => void;
 }
 
 type ManagerSection = "defaults" | "custom" | "transfer";
@@ -66,6 +70,16 @@ function statusText(status: string | undefined): string {
   if (status === "fresh") return "行情正常";
   if (status === "stale") return "沿用最近行情";
   return "行情未接入";
+}
+
+function financialStatusText(
+  snapshot: CustomFinancialSnapshot | undefined,
+): string {
+  if (!snapshot) return "财务待更新";
+  if (snapshot.status === "fresh") return "财务已更新";
+  if (snapshot.status === "partial") return "财务部分可用";
+  if (snapshot.status === "stale") return "财务沿用缓存";
+  return "财务暂不可用";
 }
 
 function fileDate(): string {
@@ -270,8 +284,18 @@ export default function WatchPoolManager({
       onChange(next);
       setForm(EMPTY_FORM);
       setFormError("");
-      setNotice(successMessage);
-      if (company.quoteCode) onRefreshCustom([company]);
+      const supportsFinancialRefresh =
+        company.market === "A" ||
+        company.market === "HK" ||
+        company.market === "US";
+      setNotice(
+        supportsFinancialRefresh || company.quoteCode
+          ? `${successMessage}；正在更新行情与财务`
+          : successMessage,
+      );
+      if (supportsFinancialRefresh || company.quoteCode) {
+        onRefreshCustom([company]);
+      }
       return true;
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "添加失败");
@@ -331,7 +355,9 @@ export default function WatchPoolManager({
       return;
     }
     const quoteCache = { ...state.quoteCache };
+    const financialCache = { ...state.financialCache };
     delete quoteCache[id];
+    delete financialCache[id];
     commit(
       {
         ...state,
@@ -339,6 +365,7 @@ export default function WatchPoolManager({
           (item) => item.id !== id,
         ),
         quoteCache,
+        financialCache,
       },
       `已删除 ${company.name}`,
     );
@@ -431,10 +458,14 @@ export default function WatchPoolManager({
     );
     setParsedImport(null);
     setTransferText("");
-    const quoteCompanies = imported.customCompanies.filter(
-      (company) => company.quoteCode,
+    const refreshableCompanies = imported.customCompanies.filter(
+      (company) =>
+        company.quoteCode ||
+        company.market === "A" ||
+        company.market === "HK" ||
+        company.market === "US",
     );
-    if (quoteCompanies.length) onRefreshCustom(quoteCompanies);
+    if (refreshableCompanies.length) onRefreshCustom(refreshableCompanies);
   };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -594,19 +625,26 @@ export default function WatchPoolManager({
                 <div>
                   <h3>自定义观察</h3>
                   <p>
-                    只接入可验证行情；财务、估值和可比统计不会自动补齐。
+                    新增 A股、港股或美股公司后，会自动尝试更新行情并补齐最近完整年报；
+                    缺失字段保留为空，不会按 0 计算。
                   </p>
                 </div>
                 <button
                   type="button"
                   className="watch-pool-link-button"
-                  onClick={() => onRefreshCustom()}
+                  onClick={() => onRefreshCustom(undefined, true)}
                   disabled={
                     customQuotesRefreshing ||
-                    !state.customCompanies.some((company) => company.quoteCode)
+                    !state.customCompanies.some(
+                      (company) =>
+                        company.quoteCode ||
+                        company.market === "A" ||
+                        company.market === "HK" ||
+                        company.market === "US",
+                    )
                   }
                 >
-                  {customQuotesRefreshing ? "更新中…" : "更新行情"}
+                  {customQuotesRefreshing ? "更新中…" : "强制更新行情与财务"}
                 </button>
               </div>
 
@@ -857,7 +895,8 @@ export default function WatchPoolManager({
                   </label>
                   <div className="watch-pool-form-actions">
                     <small>
-                      手工录入用于候选库外公司；名称和代码用于避免误匹配。
+                      不提供行情代码也可保存；可识别的 A股、港股或美股代码仍会尝试补齐财务，
+                      缺少行情时估值指标留空。
                     </small>
                     <button type="submit">添加到观察池</button>
                   </div>
@@ -868,6 +907,15 @@ export default function WatchPoolManager({
                 <div className="watch-pool-list custom-list">
                   {state.customCompanies.map((company) => {
                     const quote = state.quoteCache[company.id];
+                    const financial = state.financialCache[company.id];
+                    const financialDetail =
+                      financial?.reportPeriod ??
+                      financial?.reportDate ??
+                      null;
+                    const financialTitle =
+                      financial?.message ||
+                      financial?.errors[0] ||
+                      "新增后自动更新；也可点击上方按钮强制重试";
                     return (
                       <article className="watch-pool-row" key={company.id}>
                         <div>
@@ -890,6 +938,19 @@ export default function WatchPoolManager({
                           </strong>
                           <span className={`quote-state is-${quote?.status ?? "unavailable"}`}>
                             {statusText(quote?.status)}
+                          </span>
+                          <span
+                            className={`quote-state is-${financial?.status ?? "unavailable"}`}
+                            title={financialTitle}
+                          >
+                            {financialStatusText(financial)}
+                            {financialDetail ? ` · ${financialDetail}` : ""}
+                            {financial?.dataQualityScore !== null &&
+                            financial?.dataQualityScore !== undefined
+                              ? ` · 质量 ${Math.round(
+                                  financial.dataQualityScore,
+                                )}`
+                              : ""}
                           </span>
                           <button
                             type="button"

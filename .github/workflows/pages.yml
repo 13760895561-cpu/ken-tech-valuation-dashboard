@@ -89,7 +89,7 @@ jobs:
         run: |
           npm run check
           node --test tests/static-export.test.mjs
-          npx tsx --test tests/watch-pool.test.ts tests/peer-statistics.test.ts tests/excel-export.test.ts
+          npx tsx --test tests/watch-pool.test.ts tests/peer-statistics.test.ts tests/excel-export.test.ts tests/custom-financials.test.ts tests/custom-financial-cache.test.ts tests/market-refresh-fx.test.ts
 
       - name: Preserve the validated snapshot
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

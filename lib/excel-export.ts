@@ -422,14 +422,22 @@ function buildOverviewRows(input: DashboardExcelExportInput): unknown[][] {
     ["行情日期", quoteDates, "日期；当前观察池最早至最晚行情日"],
     ["汇率日期", excelDate(recordValue(fx, "date")), "日期；人民币折算汇率时点"],
     ["当前观察公司", input.companies.length, "家；已排除本机隐藏的默认公司"],
-    ["其中自定义公司", customCount, "家；仅导出证券身份与公开行情，不导出个人备注"],
-    ["估值公司", input.valuations.length, "家；自定义仅行情公司不参与估值"],
+    [
+      "其中自定义公司",
+      customCount,
+      "家；导出公开行情、自动补全财务与派生指标，不导出个人备注",
+    ],
+    [
+      "估值公司",
+      input.valuations.length,
+      "家；自定义公司可展示自身倍数，但不自动进入模型估值",
+    ],
     [
       "核心数据完整",
       input.companies.filter(
         (company) => textValue(company.coreStatus).toUpperCase() === "OK",
       ).length,
-      "家；自定义仅行情公司通常不计入",
+      "家；已自动补全核心财务的自定义公司可计入完整数",
     ],
     [
       "估值输入完整",
@@ -542,7 +550,11 @@ function buildCoreRows(companies: RecordLike[]): unknown[][] {
       textValue(company.market),
       textValue(company.region),
       textValue(company.group),
-      company.trackingOrigin === "custom" ? "用户添加·仅行情" : "默认核验公司",
+      company.trackingOrigin === "custom"
+        ? company.report_date
+          ? "用户添加·自动财务"
+          : "用户添加·财务待补全"
+        : "默认核验公司",
       excelDate(company.quote_date),
       numberValue(company.price_local),
       textValue(recordValue(company, "quote_currency", "currency")),
@@ -907,7 +919,7 @@ function buildSourceRows(companies: RecordLike[]): unknown[][] {
     textValue(company.financial_refresh_status),
     excelDate(company.financial_source_generated_at),
     numberValue(company.data_quality_score),
-    "日期为来源时点；数据质量为0–100分；来源地址以纯文本保留。自定义仅行情公司没有财报来源时留空。",
+    "日期为来源时点；数据质量为0–100分；来源地址以纯文本保留。自定义公司使用自动结构化财务时会标明报告期、来源和更新状态；缺失来源保持空白。",
   ]);
 }
 
@@ -1002,7 +1014,7 @@ function buildCheckRows(
       valuationCount,
       formula("B7-C7"),
       formula('IF(D7=0,"OK","检查")'),
-      "自定义仅行情公司不进入估值",
+      "自定义公司可展示自身倍数，但不自动进入模型估值",
       "行数；公式引用估值明细工作表",
     ],
     [
@@ -1064,7 +1076,8 @@ export function buildDashboardWorkbookSheets(
       formats: coreFormats(),
       textColumns: [1, 9, 16, 46, 47, 48],
       dateColumns: [7, 15],
-      sourceNote: "金额与派生值保留核验结果，完整公式写在每行最右侧；自定义仅行情公司财务和估值留空",
+      sourceNote:
+        "金额与派生值保留核验结果，完整公式写在每行最右侧；自定义公司有可靠自动财务时一并导出，缺失值保持空白",
       stickyColumnsCount: 2,
       zoomScale: 0.6,
     },

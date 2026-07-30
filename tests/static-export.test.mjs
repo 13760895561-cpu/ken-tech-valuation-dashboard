@@ -100,9 +100,24 @@ test("quote and financial currencies are converted independently", async () => {
 });
 
 test("GitHub Pages mode keeps live refresh and persistence explicit", async () => {
-  const [component, config, workflow, refreshScript, marketRefresh] =
+  const [
+    component,
+    customFinancials,
+    customFinancialCache,
+    watchPool,
+    config,
+    workflow,
+    refreshScript,
+    marketRefresh,
+  ] =
     await Promise.all([
     readFile(new URL("../components/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/custom-financials.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../lib/custom-financial-cache.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../lib/watch-pool.ts", import.meta.url), "utf8"),
     readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
     readFile(
       new URL("../.github/workflows/pages.yml", import.meta.url),
@@ -137,6 +152,15 @@ test("GitHub Pages mode keeps live refresh and persistence explicit", async () =
   assert.match(component, /filters: \{ query, group, region \}/);
   assert.match(component, /aria-describedby="excel-export-feedback"/);
   assert.match(component, /aria-live=/);
+  assert.match(component, /fetchCustomFinancials/);
+  assert.match(component, /deriveCompanies/);
+  assert.doesNotMatch(component, /用户自定义（仅行情）/);
+  assert.match(customFinancials, /RPT_F10_FINANCE_MAINFINADATA/);
+  assert.match(customFinancials, /RPT_HKF10_FN_MAININDICATOR/);
+  assert.match(customFinancials, /RPT_USF10_FN_GMAININDICATOR/);
+  assert.match(customFinancialCache, /CUSTOM_FINANCIAL_RETRY_TTL_MS/);
+  assert.match(customFinancialCache, /mergeCustomFinancialRefresh/);
+  assert.match(watchPool, /financialCache/);
   assert.doesNotMatch(component, /\/api\/dashboard/);
   assert.match(workflow, /actions\/deploy-pages/);
   assert.match(workflow, /schedule:/);

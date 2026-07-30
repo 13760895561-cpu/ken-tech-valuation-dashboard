@@ -183,7 +183,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "688825.SH",
     market: "A",
     quoteCode: "sh688825",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: [
       "ChangXin Technology",
       "ChangXin Memory",
@@ -203,7 +204,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "688981.SH",
     market: "A",
     quoteCode: "sh688981",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["SMIC", "zhongxinguoji", "zxgj"],
   },
   {
@@ -215,7 +217,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "002371.SZ",
     market: "A",
     quoteCode: "sz002371",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["NAURA", "beifanghuachuang", "bfhc"],
   },
   {
@@ -227,7 +230,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "002463.SZ",
     market: "A",
     quoteCode: "sz002463",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["WUS", "hudiangufen", "hdgf"],
   },
   {
@@ -239,7 +243,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "TSM",
     market: "US",
     quoteCode: "usTSM",
-    note: "美股存托凭证；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "美股存托凭证；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["TSMC", "Taiwan Semiconductor", "taijidian", "tjd"],
   },
   {
@@ -251,7 +256,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "MU",
     market: "US",
     quoteCode: "usMU",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Micron", "meiguangkeji", "mgkj"],
   },
   {
@@ -263,7 +269,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "AAPL",
     market: "US",
     quoteCode: "usAAPL",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Apple Inc", "pingguo", "pg"],
   },
   {
@@ -275,7 +282,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "AMZN",
     market: "US",
     quoteCode: "usAMZN",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Amazon.com", "yamaxun", "ymx"],
   },
   {
@@ -287,7 +295,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "META",
     market: "US",
     quoteCode: "usMETA",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Facebook", "lianpushu", "fb"],
   },
   {
@@ -299,7 +308,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "TSLA",
     market: "US",
     quoteCode: "usTSLA",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Tesla Motors", "tesila", "tsl"],
   },
   {
@@ -311,7 +321,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "ASML",
     market: "US",
     quoteCode: "usASML",
-    note: "美股存托凭证；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "美股存托凭证；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["ASML Holding", "asimai", "asm"],
   },
   {
@@ -323,7 +334,8 @@ const CURATED_CANDIDATES: WatchSearchCandidate[] = [
     ticker: "01810.HK",
     market: "HK",
     quoteCode: "hk01810",
-    note: "智能搜索候选；仅接入可验证行情，不自动补充财务或估值数据。",
+    note:
+      "智能搜索候选；自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
     aliases: ["Xiaomi Corporation", "xiaomijituan", "xmjt", "xm"],
   },
 ];
@@ -416,7 +428,7 @@ export function parseSecurityCatalog(
       market,
       quoteCode,
       note:
-        "证券目录匹配；添加后仅接入可验证行情，不自动补充财务或估值数据。",
+        "证券目录匹配；添加后自动获取可验证行情与最近完整年报财务，自定义公司不自动进入可比组或估值模型。",
       aliases,
     });
   }
