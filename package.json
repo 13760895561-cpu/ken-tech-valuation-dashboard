@@ -9,7 +9,7 @@
     "dev": "next dev",
     "prebuild": "npm run sync:static",
     "build": "next build",
-    "test": "npm run build && node --test tests/static-export.test.mjs && tsx --test tests/watch-pool.test.ts",
+    "test": "npm run build && node --test tests/static-export.test.mjs && tsx --test tests/watch-pool.test.ts tests/peer-statistics.test.ts tests/excel-export.test.ts",
     "check": "tsc --noEmit",
     "sync:static": "tsx scripts/refresh-static-data.ts --copy",
     "refresh:static": "tsx scripts/refresh-static-data.ts --refresh",
@@ -19,7 +19,8 @@
   "dependencies": {
     "next": "16.2.12",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "write-excel-file": "4.1.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",

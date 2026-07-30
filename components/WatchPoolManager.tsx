@@ -23,6 +23,14 @@ import {
   type ParsedWatchPoolImport,
   type WatchPoolState,
 } from "@/lib/watch-pool";
+import {
+  buildWatchSearchCatalog,
+  getWatchSearchAvailability,
+  parseSecurityCatalog,
+  resolveWatchSearchKey,
+  searchWatchCatalog,
+  type WatchSearchCandidate,
+} from "@/lib/watch-search";
 
 export interface DefaultWatchCompany {
   id: string;
@@ -106,6 +114,14 @@ export default function WatchPoolManager({
 }: WatchPoolManagerProps) {
   const [section, setSection] = useState<ManagerSection>("defaults");
   const [defaultQuery, setDefaultQuery] = useState("");
+  const [smartQuery, setSmartQuery] = useState("");
+  const [activeSmartIndex, setActiveSmartIndex] = useState(0);
+  const [directoryCandidates, setDirectoryCandidates] = useState<
+    WatchSearchCandidate[]
+  >([]);
+  const [directoryStatus, setDirectoryStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const [form, setForm] = useState<CustomCompanyInput>(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
@@ -135,6 +151,18 @@ export default function WatchPoolManager({
         .includes(query);
     });
   }, [defaultCompanies, defaultQuery]);
+  const smartCatalog = useMemo(
+    () => buildWatchSearchCatalog(defaultCompanies, directoryCandidates),
+    [defaultCompanies, directoryCandidates],
+  );
+  const smartResults = useMemo(
+    () => searchWatchCatalog(smartQuery, smartCatalog),
+    [smartCatalog, smartQuery],
+  );
+
+  useEffect(() => {
+    setActiveSmartIndex(0);
+  }, [smartQuery, smartResults.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -155,6 +183,39 @@ export default function WatchPoolManager({
       previousFocusRef.current?.focus();
     };
   }, [onClose, open]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      section !== "custom" ||
+      directoryStatus !== "idle"
+    ) {
+      return;
+    }
+    setDirectoryStatus("loading");
+    void (async () => {
+      try {
+        const url = new URL(
+          "data/security-catalog.json",
+          document.baseURI,
+        ).toString();
+        const response = await fetch(url, {
+          cache: "force-cache",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          throw new Error(`证券目录 HTTP ${response.status}`);
+        }
+        const candidates = parseSecurityCatalog(
+          (await response.json()) as unknown,
+        );
+        setDirectoryCandidates(candidates);
+        setDirectoryStatus("ready");
+      } catch {
+        setDirectoryStatus("error");
+      }
+    })();
+  }, [directoryStatus, open, section]);
 
   useEffect(() => {
     if (open) return;
@@ -189,7 +250,7 @@ export default function WatchPoolManager({
   const addCompany = (
     input: CustomCompanyInput,
     successMessage = "已添加自定义公司",
-  ) => {
+  ): boolean => {
     try {
       if (state.customCompanies.length >= MAX_CUSTOM_COMPANIES) {
         throw new Error(`自定义公司最多 ${MAX_CUSTOM_COMPANIES} 家`);
@@ -211,22 +272,54 @@ export default function WatchPoolManager({
       setFormError("");
       setNotice(successMessage);
       if (company.quoteCode) onRefreshCustom([company]);
+      return true;
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "添加失败");
+      return false;
     }
   };
 
-  const addLongxin = () => {
-    addCompany(
-      {
-        name: "长鑫科技",
-        ticker: "688825",
-        market: "A",
-        quoteCode: "sh688825",
-        note: "预设快捷观察；仅接入可验证行情，不自动补充财务或估值数据。",
-      },
-      "已添加长鑫科技 688825",
+  const selectSmartCandidate = (candidate: WatchSearchCandidate) => {
+    setFormError("");
+    const availability = getWatchSearchAvailability(
+      candidate,
+      state.hiddenDefaultIds,
+      state.customCompanies,
     );
+    if (candidate.source === "default" && candidate.defaultId) {
+      if (availability === "default-hidden") {
+        commit(
+          {
+            ...state,
+            hiddenDefaultIds: state.hiddenDefaultIds.filter(
+              (id) => id !== candidate.defaultId,
+            ),
+          },
+          `已恢复 ${candidate.name}，无需重复创建`,
+        );
+      } else {
+        setNotice(`${candidate.name} 已在默认观察池中，无需重复添加`);
+      }
+      setSmartQuery("");
+      return;
+    }
+    if (availability === "custom-added") {
+      setNotice(`${candidate.name} 已在自定义观察池中，无需重复添加`);
+      setSmartQuery("");
+      return;
+    }
+
+    const added = addCompany(
+      {
+        name: candidate.name,
+        ticker: candidate.ticker,
+        market: candidate.market,
+        quoteCode: candidate.quoteCode,
+        note: candidate.note,
+      },
+      `已添加 ${candidate.name} ${candidate.ticker}`,
+    );
+    if (added) setSmartQuery("");
   };
 
   const deleteCustom = (id: string) => {
@@ -363,11 +456,6 @@ export default function WatchPoolManager({
 
   const visibleDefaultCount =
     defaultCompanies.length - state.hiddenDefaultIds.length;
-  const longxinExists = state.customCompanies.some(
-    (company) =>
-      company.quoteCode?.toLowerCase() === "sh688825" ||
-      company.ticker.startsWith("688825"),
-  );
 
   return (
     <div
@@ -522,109 +610,259 @@ export default function WatchPoolManager({
                 </button>
               </div>
 
-              <div className="watch-pool-preset">
-                <div>
-                  <strong>快捷新增：长鑫科技</strong>
-                  <span>688825.SH · A股 · 仅行情观察</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={addLongxin}
-                  disabled={longxinExists}
-                >
-                  {longxinExists ? "已添加" : "一键添加"}
-                </button>
-              </div>
-
               <form
-                className="watch-pool-form"
+                className="watch-pool-smart-search"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  addCompany(form);
+                  const first = smartResults[0];
+                  if (first) selectSmartCandidate(first);
                 }}
               >
-                <label>
-                  <span>公司名称</span>
+                <label htmlFor="watch-pool-smart-query">
+                  <span>输入一项即可搜索并添加</span>
                   <input
+                    id="watch-pool-smart-query"
+                    type="search"
                     required
                     maxLength={80}
-                    value={form.name}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
+                    value={smartQuery}
+                    onChange={(event) => {
+                      setSmartQuery(event.target.value);
+                      setFormError("");
+                      setNotice("");
+                    }}
+                    onKeyDown={(event) => {
+                      const decision = resolveWatchSearchKey(
+                        event.key,
+                        event.nativeEvent.isComposing,
+                        smartQuery,
+                        smartResults.length,
+                        activeSmartIndex,
+                      );
+                      if (decision.type === "move") {
+                        event.preventDefault();
+                        setActiveSmartIndex(decision.index);
+                      } else if (decision.type === "select") {
+                        event.preventDefault();
+                        selectSmartCandidate(
+                          smartResults[decision.index],
+                        );
+                      } else if (decision.type === "clear") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSmartQuery("");
+                      }
+                    }}
+                    placeholder="代码 / 中文名 / 英文名 / 拼音首字母"
+                    autoComplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-controls="watch-pool-smart-results"
+                    aria-expanded={Boolean(smartQuery.trim())}
+                    aria-activedescendant={
+                      smartResults[activeSmartIndex]
+                        ? `watch-search-option-${activeSmartIndex}`
+                        : undefined
                     }
-                    placeholder="例如：长鑫科技"
                   />
                 </label>
-                <label>
-                  <span>证券代码或自定义代码</span>
-                  <input
-                    required
-                    maxLength={24}
-                    value={form.ticker}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        ticker: event.target.value,
-                      }))
-                    }
-                    placeholder="例如：688825"
-                  />
-                </label>
-                <label>
-                  <span>市场</span>
-                  <select
-                    value={form.market}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        market: event.target.value as CustomMarket,
-                      }))
-                    }
-                  >
-                    <option value="A">A股</option>
-                    <option value="HK">港股</option>
-                    <option value="US">美股</option>
-                    <option value="OTHER">其他市场 / 仅记录</option>
-                  </select>
-                </label>
-                <label>
-                  <span>腾讯行情代码（可选）</span>
-                  <input
-                    maxLength={32}
-                    value={form.quoteCode ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        quoteCode: event.target.value,
-                      }))
-                    }
-                    placeholder="自动推断，或填写 sh688825"
-                  />
-                </label>
-                <label className="watch-pool-form-wide">
-                  <span>观察备注（可选）</span>
-                  <input
-                    maxLength={240}
-                    value={form.note ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        note: event.target.value,
-                      }))
-                    }
-                    placeholder="仅保存在当前浏览器和导出文件中"
-                  />
-                </label>
-                <div className="watch-pool-form-actions">
-                  <small>
-                    不提供行情代码也可保存；对应行情和全部计算指标将留空。
-                  </small>
-                  <button type="submit">添加到观察池</button>
+                <p>
+                  例如：688825、长鑫科技、CXMT、cxkj、NVDA、NVIDIA、英伟达或
+                  zjxc。空格、大小写、点号和横线不影响匹配。
+                </p>
+                <div
+                  className={`watch-pool-catalog-status is-${directoryStatus}`}
+                  role="status"
+                >
+                  {directoryStatus === "loading"
+                    ? "正在载入全市场本地证券目录…"
+                    : directoryStatus === "ready"
+                      ? `已载入 ${directoryCandidates.length.toLocaleString(
+                          "zh-CN",
+                        )} 只证券，可离线式快速匹配`
+                      : directoryStatus === "error"
+                        ? "全市场目录暂时未载入；默认公司、常用候选和手工录入仍可使用。"
+                        : "打开本页后将自动载入全市场本地证券目录"}
+                  {directoryStatus === "error" ? (
+                    <button
+                      type="button"
+                      onClick={() => setDirectoryStatus("idle")}
+                    >
+                      重试
+                    </button>
+                  ) : null}
                 </div>
+
+                {smartQuery.trim() ? (
+                  <div
+                    id="watch-pool-smart-results"
+                    className="watch-pool-smart-results"
+                    role="listbox"
+                    aria-label="股票搜索候选"
+                  >
+                    {smartResults.length ? (
+                      smartResults.map((candidate, index) => {
+                        const availability = getWatchSearchAvailability(
+                          candidate,
+                          state.hiddenDefaultIds,
+                          state.customCompanies,
+                        );
+                        const disabled =
+                          availability === "default-visible" ||
+                          availability === "custom-added";
+                        const actionText =
+                          availability === "default-visible"
+                            ? "已观察"
+                            : availability === "custom-added"
+                              ? "已添加"
+                              : availability === "default-hidden"
+                                ? "恢复"
+                                : "添加";
+                        return (
+                          <button
+                            key={candidate.id}
+                            id={`watch-search-option-${index}`}
+                            type="button"
+                            role="option"
+                            aria-selected={
+                              smartResults[activeSmartIndex]?.id ===
+                              candidate.id
+                            }
+                            aria-disabled={disabled}
+                            disabled={disabled}
+                            className={
+                              activeSmartIndex === index ? "is-active" : ""
+                            }
+                            onMouseEnter={() => setActiveSmartIndex(index)}
+                            onClick={() => selectSmartCandidate(candidate)}
+                          >
+                            <span>
+                              <strong>{candidate.name}</strong>
+                              {candidate.englishName &&
+                              candidate.englishName.toLowerCase() !==
+                                candidate.name.toLowerCase() ? (
+                                <small>{candidate.englishName}</small>
+                              ) : null}
+                            </span>
+                            <span className="watch-search-meta">
+                              <b>{candidate.ticker}</b>
+                              <small>
+                                {candidate.source === "default"
+                                  ? "默认公司"
+                                  : candidate.market === "A"
+                                    ? "A股"
+                                    : candidate.market === "HK"
+                                      ? "港股"
+                                      : candidate.market === "US"
+                                        ? "美股"
+                                        : "其他市场"}
+                              </small>
+                            </span>
+                            <em>{actionText}</em>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="watch-pool-search-empty">
+                        暂无匹配候选，请尝试完整代码/名称，或使用下方手工录入。
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </form>
+
+              <details className="watch-pool-manual-entry">
+                <summary>未找到候选？展开手工录入</summary>
+                <form
+                  className="watch-pool-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addCompany(form);
+                  }}
+                >
+                  <label>
+                    <span>公司名称</span>
+                    <input
+                      required
+                      maxLength={80}
+                      value={form.name}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      placeholder="例如：长鑫科技"
+                    />
+                  </label>
+                  <label>
+                    <span>证券代码或自定义代码</span>
+                    <input
+                      required
+                      maxLength={24}
+                      value={form.ticker}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          ticker: event.target.value,
+                        }))
+                      }
+                      placeholder="例如：688825"
+                    />
+                  </label>
+                  <label>
+                    <span>市场</span>
+                    <select
+                      value={form.market}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          market: event.target.value as CustomMarket,
+                        }))
+                      }
+                    >
+                      <option value="A">A股</option>
+                      <option value="HK">港股</option>
+                      <option value="US">美股</option>
+                      <option value="OTHER">其他市场 / 仅记录</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>腾讯行情代码（可选）</span>
+                    <input
+                      maxLength={32}
+                      value={form.quoteCode ?? ""}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          quoteCode: event.target.value,
+                        }))
+                      }
+                      placeholder="自动推断，或填写 sh688825"
+                    />
+                  </label>
+                  <label className="watch-pool-form-wide">
+                    <span>观察备注（可选）</span>
+                    <input
+                      maxLength={240}
+                      value={form.note ?? ""}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          note: event.target.value,
+                        }))
+                      }
+                      placeholder="仅保存在当前浏览器和导出文件中"
+                    />
+                  </label>
+                  <div className="watch-pool-form-actions">
+                    <small>
+                      手工录入用于候选库外公司；名称和代码用于避免误匹配。
+                    </small>
+                    <button type="submit">添加到观察池</button>
+                  </div>
+                </form>
+              </details>
 
               {state.customCompanies.length ? (
                 <div className="watch-pool-list custom-list">

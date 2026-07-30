@@ -123,6 +123,20 @@ test("GitHub Pages mode keeps live refresh and persistence explicit", async () =
   assert.match(component, /activeDefaultIds/);
   assert.match(component, /scopeRowsToActiveCompanies/);
   assert.match(component, /customCompanyView/);
+  assert.match(component, /导出 Excel/);
+  assert.match(component, /完整观察池/);
+  assert.match(
+    component,
+    /await import\("@\/lib\/excel-export"\)/,
+    "工作簿代码应在用户点击导出时才动态载入",
+  );
+  assert.match(component, /delete shareable\.customNote/);
+  assert.match(component, /valuations: activeValuations/);
+  assert.match(component, /events: scopedEvents/);
+  assert.match(component, /history: scopedHistory/);
+  assert.match(component, /filters: \{ query, group, region \}/);
+  assert.match(component, /aria-describedby="excel-export-feedback"/);
+  assert.match(component, /aria-live=/);
   assert.doesNotMatch(component, /\/api\/dashboard/);
   assert.match(workflow, /actions\/deploy-pages/);
   assert.match(workflow, /schedule:/);

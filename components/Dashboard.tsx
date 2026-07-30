@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type { DashboardDataset } from "@/lib/dashboard-types";
+import type { DashboardExcelExportInput } from "@/lib/excel-export";
 import {
   TENCENT_QUOTE_SOURCE,
   fetchCustomQuoteUpdates,
@@ -30,6 +31,7 @@ import {
 import WatchPoolManager, {
   type DefaultWatchCompany,
 } from "./WatchPoolManager";
+import PeerBreakdown from "./PeerBreakdown";
 import "./dashboard.css";
 
 type Primitive = string | number | boolean | null | undefined;
@@ -168,6 +170,8 @@ type SortKey =
   | "temperature"
   | "confidence"
   | "name";
+
+type ExcelExportState = "idle" | "exporting" | "success" | "error";
 
 const TABS: Array<{ id: TabKey; label: string; shortLabel: string }> = [
   { id: "overview", label: "首页总览", shortLabel: "总览" },
@@ -1046,72 +1050,7 @@ function CoreTable({
 }
 
 function PeerTable({ companies }: { companies: DashboardCompany[] }) {
-  const groups = [...new Set(companies.map((company) => company.group).filter(Boolean))];
-  const rows = groups.map((group) => {
-    const groupCompanies = companies.filter((company) => company.group === group);
-    return {
-      group,
-      count: groupCompanies.length,
-      aShares: groupCompanies.filter((company) => company.region === "A股").length,
-      global: groupCompanies.filter((company) => company.region !== "A股").length,
-      revenuePerEmployee: median(
-        groupCompanies
-          .filter((company) => company.region === "A股")
-          .map((company) => company.revenuePerEmployeeCny10k),
-      ),
-      marketCapPerEmployee: median(
-        groupCompanies
-          .filter((company) => company.region === "A股")
-          .map((company) => company.marketCapPerEmployeeCny10k),
-      ),
-      evSales: median(groupCompanies.map((company) => company.evSales)),
-      evGross: median(groupCompanies.map((company) => company.evGrossProfit)),
-      ps: median(groupCompanies.map((company) => company.ps)),
-    };
-  });
-  return (
-    <div className="table-scroll">
-      <table className="data-table peer-table">
-        <caption className="sr-only">按行业可比组统计的样本数与中位数</caption>
-        <thead>
-          <tr>
-            <th scope="col">可比组</th>
-            <th scope="col">样本数</th>
-            <th scope="col">A股 / 全球参考</th>
-            <th scope="col">人均营收中位数</th>
-            <th scope="col">人均市值中位数</th>
-            <th scope="col">P/S 中位数</th>
-            <th scope="col">EV/Sales 中位数</th>
-            <th scope="col">EV/毛利中位数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.group}>
-              <th scope="row">
-                <strong>{row.group}</strong>
-              </th>
-              <td className="number-cell">{row.count}</td>
-              <td className="number-cell">
-                {row.aShares} / {row.global}
-              </td>
-              <td className="number-cell">
-                {formatNumber(row.revenuePerEmployee, 1)}
-                <small>万元/人</small>
-              </td>
-              <td className="number-cell">
-                {formatNumber(row.marketCapPerEmployee, 1)}
-                <small>万元/人</small>
-              </td>
-              <td className="number-cell">{formatNumber(row.ps, 2)}x</td>
-              <td className="number-cell">{formatNumber(row.evSales, 2)}x</td>
-              <td className="number-cell">{formatNumber(row.evGross, 2)}x</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  return <PeerBreakdown companies={companies} />;
 }
 
 function EventsTable({ rows, query }: { rows: UnknownRecord[]; query: string }) {
@@ -1621,6 +1560,9 @@ export function Dashboard({
   const [watchPoolLoaded, setWatchPoolLoaded] = useState(false);
   const [storageWarning, setStorageWarning] = useState("");
   const [customQuotesRefreshing, setCustomQuotesRefreshing] = useState(false);
+  const [excelExportState, setExcelExportState] =
+    useState<ExcelExportState>("idle");
+  const [excelExportMessage, setExcelExportMessage] = useState("");
   const inFlight = useRef(false);
   const datasetRef = useRef<DashboardDataset | null>(initialDataset ?? null);
   const lastManualAttemptRef = useRef(0);
@@ -2163,6 +2105,58 @@ export function Dashboard({
           ? scopedHistory.filter((row) => textIncludes(row, query)).length
           : visibleCompanies.length;
 
+  const handleExcelExport = async () => {
+    if (excelExportState === "exporting") return;
+    if (!data) {
+      setExcelExportState("error");
+      setExcelExportMessage("当前没有可导出的完整数据快照。");
+      return;
+    }
+
+    setExcelExportState("exporting");
+    setExcelExportMessage("正在生成 9 个工作表，请稍候…");
+    try {
+      const shareableCompanies: UnknownRecord[] = [
+        ...companies,
+        ...customCompanies,
+      ].map((company) => {
+        const shareable: UnknownRecord = { ...company };
+        delete shareable.customNote;
+        return shareable;
+      });
+      const exportInput: DashboardExcelExportInput = {
+        asOf: data.asOf || "",
+        generatedAt: data.generatedAt || "",
+        quoteDateMin: data.quoteDateMin || "",
+        quoteDateMax: data.quoteDateMax || "",
+        fx: data.fx,
+        summary: data.summary,
+        companies: shareableCompanies,
+        valuations: activeValuations as UnknownRecord[],
+        events: scopedEvents,
+        history: scopedHistory,
+        methodology: data.methodology,
+        status,
+        filters: { query, group, region },
+      };
+      const { downloadDashboardExcel } = await import("@/lib/excel-export");
+      const filename = await downloadDashboardExcel(exportInput);
+      setExcelExportState("success");
+      setExcelExportMessage(
+        `已下载 ${filename}；共 ${shareableCompanies.length} 家公司，私人备注未导出。`,
+      );
+    } catch (exportError) {
+      setExcelExportState("error");
+      setExcelExportMessage(
+        `导出失败：${
+          exportError instanceof Error
+            ? exportError.message
+            : "浏览器未能生成工作簿"
+        }`,
+      );
+    }
+  };
+
   if (isLoading && !response) {
     return (
       <div className="dashboard-shell dashboard-loading">
@@ -2216,6 +2210,30 @@ export function Dashboard({
               </small>
             </span>
           </button>
+          <button
+            className={`excel-export-button is-${excelExportState}`}
+            type="button"
+            onClick={() => void handleExcelExport()}
+            disabled={excelExportState === "exporting" || !data}
+            aria-busy={excelExportState === "exporting"}
+            aria-describedby="excel-export-feedback"
+            aria-label={
+              excelExportState === "exporting"
+                ? "正在导出当前完整观察池 Excel"
+                : "导出当前完整观察池 Excel"
+            }
+          >
+            <span
+              className={excelExportState === "exporting" ? "is-spinning" : ""}
+              aria-hidden="true"
+            >
+              {excelExportState === "exporting" ? "◌" : "⇩"}
+            </span>
+            <span>
+              {excelExportState === "exporting" ? "导出中" : "导出 Excel"}
+              <small>完整观察池</small>
+            </span>
+          </button>
           <div className="auto-update">
             <span className="pulse-dot" aria-hidden="true" />
             <span>
@@ -2239,6 +2257,23 @@ export function Dashboard({
           </button>
         </div>
       </header>
+
+      <div
+        id="excel-export-feedback"
+        className={`excel-export-feedback is-${excelExportState}`}
+        role={excelExportState === "error" ? "alert" : "status"}
+        aria-live={excelExportState === "error" ? "assertive" : "polite"}
+        hidden={excelExportState === "idle"}
+      >
+        <span aria-hidden="true">
+          {excelExportState === "exporting"
+            ? "◌"
+            : excelExportState === "success"
+              ? "✓"
+              : "!"}
+        </span>
+        <span>{excelExportMessage}</span>
+      </div>
 
       <div className={`status-strip ${statusClass(status)}`} role="status" aria-live="polite">
         <div>
@@ -2453,7 +2488,7 @@ export function Dashboard({
                 <SectionHeading
                   eyebrow="同组比较"
                   title="可比组统计"
-                  description="分别观察A股样本和全球参考，表内展示当前筛选范围的中位数。"
+                  description="点击各市场桶可展开样本、P75 / 中位数 / P25 与插值过程；A股、中国成熟锚、美股按市场桶独立计算。"
                 />
                 <PeerTable companies={visibleDefaultCompanies} />
               </>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   WATCH_POOL_EXPORT_KIND,
@@ -13,8 +14,175 @@ import {
   serializeWatchPoolExport,
   type WatchPoolState,
 } from "../lib/watch-pool";
+import {
+  buildWatchSearchCatalog,
+  getWatchSearchAvailability,
+  normalizeWatchSearch,
+  parseSecurityCatalog,
+  resolveWatchSearchKey,
+  searchWatchCatalog,
+} from "../lib/watch-search";
 
 const DEFAULT_IDS = ["smic", "naura", "tencent"];
+
+test("single-input stock search normalizes punctuation, spaces, and case", () => {
+  assert.equal(normalizeWatchSearch(" 688825.SH "), "688825SH");
+  assert.equal(normalizeWatchSearch("Zhong-Ji Xu.Chuang"), "ZHONGJIXUCHUANG");
+  assert.equal(normalizeWatchSearch(" CX-MT "), "CXMT");
+  assert.equal(normalizeWatchSearch("ｎｖｄａ"), "NVDA");
+});
+
+test("single-input stock search matches code, Chinese, English, and pinyin initials", () => {
+  const catalog = buildWatchSearchCatalog([
+    {
+      id: "NVDA",
+      name: "英伟达",
+      ticker: "NVDA",
+      group: "AI算力芯片",
+      region: "美股",
+    },
+    {
+      id: "300308",
+      name: "中际旭创",
+      ticker: "300308.SZ",
+      group: "光模块",
+      region: "A股",
+    },
+    {
+      id: "00700",
+      name: "腾讯控股",
+      ticker: "00700.HK",
+      group: "互联网平台",
+      region: "港股",
+    },
+  ]);
+
+  for (const query of [
+    "NVDA",
+    "NVIDIA",
+    "Nvidia",
+    "英伟达",
+    "yingweida",
+    "ywd",
+  ]) {
+    const result = searchWatchCatalog(query, catalog);
+    assert.equal(result[0]?.defaultId, "NVDA", query);
+  }
+  for (const query of [
+    "300308",
+    "300308.SZ",
+    "SZ300308",
+    "３００３０８．ＳＺ",
+    "中际旭创",
+    "Zhongji Innolight",
+    "zj-xc",
+  ]) {
+    const result = searchWatchCatalog(query, catalog);
+    assert.equal(result[0]?.defaultId, "300308", query);
+  }
+  for (const query of [
+    "688825",
+    "688825.SH",
+    "SH688825",
+    "长鑫",
+    "长鑫科技",
+    "ChangXin",
+    "CXMT",
+    "cx-kj",
+    "changxinkeji",
+  ]) {
+    const result = searchWatchCatalog(query, catalog);
+    assert.equal(result[0]?.ticker, "688825.SH", query);
+    assert.equal(result[0]?.quoteCode, "sh688825", query);
+  }
+  for (const query of [
+    "00700",
+    "00700.HK",
+    "HK00700",
+    "００７００．ＨＫ",
+    "腾讯",
+    "Tencent",
+  ]) {
+    const result = searchWatchCatalog(query, catalog);
+    assert.equal(result[0]?.defaultId, "00700", query);
+  }
+});
+
+test("shipped security catalog has a valid full-market shape and feeds normalized search", () => {
+  const document = JSON.parse(
+    readFileSync(
+      new URL("../public/data/security-catalog.json", import.meta.url),
+      "utf8",
+    ),
+  ) as unknown;
+  const directory = parseSecurityCatalog(document);
+  assert.ok(directory.length > 5_000);
+
+  const catalog = buildWatchSearchCatalog([], directory);
+  for (const query of [
+    "688825.SH",
+    "长鑫",
+    "Chang-Xin",
+    "cxkj",
+    "changxinkeji",
+  ]) {
+    const result = searchWatchCatalog(query, catalog);
+    assert.equal(result[0]?.ticker, "688825.SH", query);
+    assert.equal(result[0]?.quoteCode, "sh688825", query);
+  }
+
+  const zhongji = searchWatchCatalog("zj xc", catalog)[0];
+  assert.equal(zhongji?.ticker, "300308.SZ");
+  assert.equal(searchWatchCatalog("００７００．ＨＫ", catalog)[0]?.ticker, "00700.HK");
+});
+
+test("search state restores hidden defaults, disables duplicates, and protects IME composition", () => {
+  const catalog = buildWatchSearchCatalog([
+    {
+      id: "NVDA",
+      name: "英伟达",
+      ticker: "NVDA",
+      group: "AI算力芯片",
+      region: "美股",
+    },
+  ]);
+  const nvda = searchWatchCatalog("NVDA", catalog)[0];
+  const longxin = searchWatchCatalog("688825", catalog)[0];
+
+  assert.equal(getWatchSearchAvailability(nvda, [], []), "default-visible");
+  assert.equal(
+    getWatchSearchAvailability(nvda, ["NVDA"], []),
+    "default-hidden",
+  );
+  assert.equal(getWatchSearchAvailability(longxin, [], []), "available");
+  assert.equal(
+    getWatchSearchAvailability(longxin, [], [
+      {
+        market: "A",
+        ticker: "688825.SH",
+        quoteCode: "sh688825",
+      },
+    ]),
+    "custom-added",
+  );
+
+  assert.deepEqual(
+    resolveWatchSearchKey("Enter", true, "英伟达", 3, 1),
+    { type: "none", index: 1 },
+  );
+  assert.deepEqual(
+    resolveWatchSearchKey("ArrowDown", false, "英伟达", 3, 1),
+    { type: "move", index: 2 },
+  );
+  assert.deepEqual(
+    resolveWatchSearchKey("Enter", false, "英伟达", 3, 2),
+    { type: "select", index: 2 },
+  );
+  assert.deepEqual(
+    resolveWatchSearchKey("Escape", false, "英伟达", 3, 2),
+    { type: "clear", index: 0 },
+  );
+});
 
 test("normalizes A/HK/US quote codes and creates the Longxin preset shape", () => {
   const longxin = createCustomWatchCompany({
@@ -32,6 +200,7 @@ test("normalizes A/HK/US quote codes and creates the Longxin preset shape", () =
   assert.equal(longxin.currency, "CNY");
   assert.equal(normalizeQuoteCode("HK", "700", null), "hk00700");
   assert.equal(normalizeQuoteCode("US", "NVDA", "USnvda"), "usNVDA");
+  assert.equal(normalizeQuoteCode("A", "920001", null), "bj920001");
 });
 
 test("JSON and sync-code transfers preserve only watch-pool identity fields", () => {

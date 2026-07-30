@@ -133,7 +133,7 @@ function defaultsForMarket(market: CustomMarket): {
 function inferAQuotePrefix(ticker: string): "sh" | "sz" | "bj" | null {
   const digits = ticker.match(/\d{6}/)?.[0];
   if (!digits) return null;
-  if (/^(4|8)/.test(digits)) return "bj";
+  if (/^(4|8|92)/.test(digits)) return "bj";
   if (/^(5|6|9)/.test(digits)) return "sh";
   if (/^(0|1|2|3)/.test(digits)) return "sz";
   return null;
