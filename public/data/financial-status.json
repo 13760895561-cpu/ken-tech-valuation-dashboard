@@ -1,19 +1,14 @@
 {
-  "checkedAt": "2026-07-30T03:56:22.368Z",
+  "checkedAt": "2026-07-31T00:19:30.603Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值，员工数缺失时单独沿用最近核验值。",
   "companyCount": 31,
-  "acceptedCount": 12,
+  "acceptedCount": 15,
   "changedCount": 0,
-  "unchangedAcceptedCount": 12,
-  "retainedLastGoodCount": 19,
+  "unchangedAcceptedCount": 15,
+  "retainedLastGoodCount": 16,
   "changedIds": [],
   "failed": [
-    {
-      "id": "688256",
-      "name": "寒武纪",
-      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
-    },
     {
       "id": "NVDA",
       "name": "英伟达",
@@ -45,19 +40,9 @@
       "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
     },
     {
-      "id": "688111",
-      "name": "金山办公",
-      "reason": "本次自动抓取失败，继续保留最近核验值：cashflow: HTTPSConnectionPool(host='emweb.securities.eastmoney.com', port=443): Max retries exceeded with url: /PC_HSF10/NewFinanceAnalysis/xjllbAjaxNew?companyType=4&reportDateType=0&reportType=1&dates=2019-12-31%2C2019"
-    },
-    {
-      "id": "002230",
-      "name": "科大讯飞",
+      "id": "00700",
+      "name": "腾讯控股",
       "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
-    },
-    {
-      "id": "600588",
-      "name": "用友网络",
-      "reason": "本次自动抓取失败，继续保留最近核验值：balance: HTTPSConnectionPool(host='emweb.securities.eastmoney.com', port=443): Max retries exceeded with url: /PC_HSF10/NewFinanceAnalysis/zcfzbAjaxNew?companyType=4&reportDateType=0&reportType=1&dates=2026-03-31%2C2025-"
     },
     {
       "id": "09988",
@@ -111,7 +96,7 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-07-30T11:44:46+08:00",
+    "attempted_at": "2026-07-31T08:16:45+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
@@ -124,11 +109,11 @@
       "mode": "financial_only",
       "automatic": true,
       "attempted_count": 31,
-      "refreshed_count": 14,
+      "refreshed_count": 17,
       "reused_quick_count": 0,
-      "fallback_count": 17,
+      "fallback_count": 14,
       "failed_count": 0,
-      "warning_count": 19,
+      "warning_count": 16,
       "latest_report_date": "2026-03-31",
       "status": "partial_fallback"
     },
