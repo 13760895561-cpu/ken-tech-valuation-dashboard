@@ -29,6 +29,8 @@ export interface CompanySnapshot {
   group: string;
   region: string;
   role: string;
+  /** Explicitly opts a company into or out of the reasonable-value model. */
+  valuation_target?: boolean;
   include_in_stats: boolean;
   name_quote?: string;
   price_local: MaybeNumber;

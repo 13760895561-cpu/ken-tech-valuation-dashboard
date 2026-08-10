@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseTencentFxRates } from "../lib/market-refresh";
+import {
+  TENCENT_QUOTE_BATCH_SIZE,
+  chunkTencentRequests,
+  parseTencentFxRates,
+} from "../lib/market-refresh";
+
+test("canonical quote requests split a 61-company universe into atomic batches", () => {
+  const companies = Array.from({ length: 61 }, (_, index) => index + 1);
+  const chunks = chunkTencentRequests(companies);
+
+  assert.equal(TENCENT_QUOTE_BATCH_SIZE, 30);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [30, 30, 1]);
+  assert.deepEqual(chunks.flat(), companies);
+});
 
 test("supplemental FX parsing converts direct and inverse CNY pairs", () => {
   const rates = parseTencentFxRates(

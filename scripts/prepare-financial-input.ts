@@ -14,6 +14,10 @@ interface SeedCompany {
   currency?: string;
   quote_currency?: string;
   financial_currency?: string;
+  sec_ticker?: string;
+  valuation_target?: boolean;
+  official_report_source_override?: string;
+  official_report_source_override_report_date?: string;
   [key: string]: unknown;
 }
 
@@ -39,6 +43,11 @@ const snapshotUrl = new URL(
   import.meta.url,
 );
 
+const SEC_TICKER_BY_ID: Record<string, string> = {
+  "09988": "BABA",
+  "09888": "BIDU",
+};
+
 const dataset = JSON.parse(await readFile(seedUrl, "utf8")) as SeedDataset;
 if (
   !dataset.snapshot ||
@@ -49,11 +58,21 @@ if (
 }
 
 const companies = dataset.snapshot.companies.map((company) => {
-  const quoteCurrency =
-    company.quote_currency ?? company.currency ?? marketCurrency(company.market);
-  const financialCurrency =
-    company.financial_currency ??
-    (company.market === "HK" ? "CNY" : quoteCurrency);
+  const quoteCurrency = normalizedCurrency(
+    company.quote_currency ?? company.currency,
+    marketCurrency(company.market),
+  );
+  const financialCurrency = normalizedCurrency(
+    company.financial_currency,
+    company.market === "HK" ? "CNY" : quoteCurrency,
+  );
+  const secTicker = normalizedText(company.sec_ticker) ?? SEC_TICKER_BY_ID[company.id];
+  const sourceOverride = normalizedText(
+    company.official_report_source_override,
+  );
+  const sourceOverrideReportDate = normalizedText(
+    company.official_report_source_override_report_date,
+  );
   return {
     id: company.id,
     name: company.name,
@@ -61,10 +80,21 @@ const companies = dataset.snapshot.companies.map((company) => {
     market: company.market,
     quote_code: company.quote_code,
     financial_symbol: company.financial_symbol,
-    ...(company.id === "09988" ? { sec_ticker: "BABA" } : {}),
+    ...(secTicker ? { sec_ticker: secTicker.toUpperCase() } : {}),
+    ...(sourceOverride
+      ? {
+          official_report_source_override: sourceOverride,
+          official_report_source_override_report_date:
+            sourceOverrideReportDate,
+        }
+      : {}),
     group: company.group,
     region: company.region,
     role: company.role,
+    valuation_target:
+      typeof company.valuation_target === "boolean"
+        ? company.valuation_target
+        : company.role === "重点观察",
     include_in_stats: company.include_in_stats,
     quote_currency: quoteCurrency,
     financial_currency: financialCurrency,
@@ -90,4 +120,14 @@ function marketCurrency(market: string): string {
   if (market === "US") return "USD";
   if (market === "HK") return "HKD";
   return "CNY";
+}
+
+function normalizedText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : undefined;
+}
+
+function normalizedCurrency(value: unknown, fallback: string): string {
+  return (normalizedText(value) ?? fallback).toUpperCase();
 }

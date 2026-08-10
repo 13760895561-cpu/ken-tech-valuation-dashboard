@@ -24,6 +24,7 @@ export interface PeerCompanyInput {
   ticker: string;
   group: string;
   region: string;
+  include_in_stats?: boolean;
   trackingOrigin?: "default" | "custom";
   [key: string]: unknown;
 }
@@ -310,7 +311,10 @@ export function buildPeerGroupStatistics(
   companies: PeerCompanyInput[],
 ): PeerGroupStatistics[] {
   const eligible = companies.filter(
-    (company) => company.trackingOrigin !== "custom" && company.group,
+    (company) =>
+      company.trackingOrigin !== "custom" &&
+      company.include_in_stats !== false &&
+      company.group,
   );
   const groups = [
     ...new Set(eligible.map((company) => company.group).filter(Boolean)),

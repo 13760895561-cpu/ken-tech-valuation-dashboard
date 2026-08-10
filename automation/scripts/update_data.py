@@ -47,8 +47,8 @@ SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 SEC_USER_AGENT = os.environ.get(
     "SEC_USER_AGENT",
     (
-        "TechnologyValuationTracker/1.2 "
-        "41898282+github-actions[bot]@users.noreply.github.com"
+        "KenTechValuationDashboard/1.2 "
+        "13760895561-cpu@example.com"
     ),
 )
 SEC_HEADERS = {
@@ -60,6 +60,17 @@ DEFAULT_HEADERS = {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
     )
+}
+TENCENT_FX_SOURCE = (
+    "https://qt.gtimg.cn/q="
+    "whEURCNY,whTWDCNY,whCNYJPY,whGBPCNY,whSGDCNY"
+)
+TENCENT_FX_MAPPING = {
+    "whEURCNY": ("EUR", False),
+    "whTWDCNY": ("TWD", False),
+    "whCNYJPY": ("JPY", True),
+    "whGBPCNY": ("GBP", False),
+    "whSGDCNY": ("SGD", False),
 }
 
 FINANCIAL_DATA_FIELDS = (
@@ -196,6 +207,82 @@ def add_numbers(values: Iterable[Any]) -> Optional[float]:
     return sum(valid) if valid else None
 
 
+def normalized_currency(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def required_currencies(companies: list[dict]) -> set[str]:
+    return {
+        currency
+        for company in companies
+        for currency in (
+            normalized_currency(company.get("quote_currency")),
+            normalized_currency(company.get("financial_currency")),
+        )
+        if currency
+    }
+
+
+def is_valuation_target(company: dict) -> bool:
+    explicit = company.get("valuation_target")
+    if isinstance(explicit, bool):
+        return explicit
+    role = str(company.get("role") or "").strip()
+    if role:
+        return role == "重点观察"
+    # Older 31-company configurations predate valuation_target and role.
+    return company.get("market") == "A"
+
+
+def official_report_source_override(company: dict) -> str:
+    return str(company.get("official_report_source_override") or "").strip()
+
+
+def official_report_source_override_report_date(company: dict) -> str:
+    return str(
+        company.get("official_report_source_override_report_date") or ""
+    ).strip()
+
+
+def parse_tencent_fx_rates(text: str) -> dict[str, float]:
+    rates: dict[str, float] = {}
+    for match in re.finditer(r'v_([A-Za-z0-9._-]+)="(.*?)";', text):
+        quote_code, payload = match.groups()
+        definition = TENCENT_FX_MAPPING.get(quote_code)
+        if not definition:
+            continue
+        currency, inverse = definition
+        fields = payload.split("~")
+        current = finite_number(fields[3] if len(fields) > 3 else None)
+        if current is None or current <= 0:
+            continue
+        rates[currency] = 1 / current if inverse else current
+    return rates
+
+
+def fetch_tencent_fx_rates() -> dict[str, float]:
+    last_error: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                TENCENT_FX_SOURCE,
+                headers=DEFAULT_HEADERS,
+                timeout=20,
+            )
+            response.raise_for_status()
+            rates = parse_tencent_fx_rates(
+                response.content.decode("gb18030", errors="replace")
+            )
+            if rates:
+                return rates
+            raise RuntimeError("Tencent FX response contained no usable rates")
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.8 * (attempt + 1))
+    raise RuntimeError(f"Tencent supplemental FX failed: {last_error}")
+
+
 def request_json(
     url: str,
     *,
@@ -255,10 +342,9 @@ def valid_prior_snapshot(payload: dict, companies: list[dict]) -> bool:
         ):
             return False
     rates = payload.get("fx", {}).get("rates_to_cny", {})
-    return bool(
-        finite_number(rates.get("USD"))
-        and finite_number(rates.get("HKD"))
-        and finite_number(rates.get("CNY"))
+    return all(
+        (rate := finite_number(rates.get(currency))) is not None and rate > 0
+        for currency in required_currencies(companies)
     )
 
 
@@ -267,11 +353,7 @@ def load_companies() -> list[dict]:
     if not isinstance(companies, list) or not companies:
         raise ValueError("companies.json must contain a non-empty list")
 
-    expected_currencies = {
-        "A": ("CNY", "CNY"),
-        "US": ("USD", "USD"),
-        "HK": ("HKD", "CNY"),
-    }
+    expected_quote_currencies = {"A": "CNY", "US": "USD", "HK": "HKD"}
     seen_ids: set[str] = set()
     for company in companies:
         company_id = str(company.get("id") or "")
@@ -279,22 +361,42 @@ def load_companies() -> list[dict]:
         if not company_id or company_id in seen_ids:
             raise ValueError(f"missing or duplicate company id: {company_id!r}")
         seen_ids.add(company_id)
-        if market not in expected_currencies:
+        if market not in expected_quote_currencies:
             raise ValueError(f"{company_id}: unsupported market {market!r}")
-        actual = (
-            company.get("quote_currency"),
-            company.get("financial_currency"),
-        )
-        if actual != expected_currencies[market]:
+        quote_currency = normalized_currency(company.get("quote_currency"))
+        financial_currency = normalized_currency(company.get("financial_currency"))
+        if quote_currency != expected_quote_currencies[market]:
             raise ValueError(
-                f"{company_id}: expected quote/financial currencies "
-                f"{expected_currencies[market]}, got {actual}"
+                f"{company_id}: expected quote currency "
+                f"{expected_quote_currencies[market]}, got {quote_currency!r}"
+            )
+        if not re.fullmatch(r"[A-Z]{3}", financial_currency):
+            raise ValueError(
+                f"{company_id}: invalid explicit financial currency "
+                f"{financial_currency!r}"
+            )
+        company["quote_currency"] = quote_currency
+        company["financial_currency"] = financial_currency
+        if "valuation_target" in company and not isinstance(
+            company["valuation_target"], bool
+        ):
+            raise ValueError(f"{company_id}: valuation_target must be boolean")
+        override = official_report_source_override(company)
+        if override and not override.startswith("https://"):
+            raise ValueError(
+                f"{company_id}: official_report_source_override must use HTTPS"
+            )
+        override_report_date = official_report_source_override_report_date(company)
+        if override and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", override_report_date):
+            raise ValueError(
+                f"{company_id}: official source override requires a bound report date"
             )
     return companies
 
 
-def fetch_fx() -> dict:
+def fetch_fx(companies: Optional[list[dict]] = None) -> dict:
     url = "https://api.frankfurter.app/latest"
+    required = required_currencies(companies or []) or {"CNY", "USD", "HKD"}
     try:
         payload = request_json(
             url,
@@ -306,14 +408,33 @@ def fetch_fx() -> dict:
         usd_hkd = finite_number(payload.get("rates", {}).get("HKD"))
         if not usd_cny or not usd_hkd:
             raise RuntimeError("missing FX rates")
+        rates_to_cny: dict[str, Optional[float]] = {
+            "CNY": 1.0,
+            "USD": usd_cny,
+            "HKD": usd_cny / usd_hkd,
+        }
+        supplemental_required = required - set(rates_to_cny)
+        supplemental_status = "not_required"
+        if supplemental_required:
+            supplemental_rates = fetch_tencent_fx_rates()
+            rates_to_cny.update(supplemental_rates)
+            supplemental_status = "ok"
+        missing = sorted(
+            currency
+            for currency in required
+            if finite_number(rates_to_cny.get(currency)) is None
+            or finite_number(rates_to_cny.get(currency)) <= 0
+        )
+        if missing:
+            raise RuntimeError(
+                "missing required FX rates: " + ", ".join(missing)
+            )
         return {
             "date": payload.get("date", ""),
             "source": "https://api.frankfurter.app/latest?from=USD&to=CNY,HKD",
-            "rates_to_cny": {
-                "CNY": 1.0,
-                "USD": usd_cny,
-                "HKD": usd_cny / usd_hkd,
-            },
+            "supplemental_source": TENCENT_FX_SOURCE,
+            "supplemental_status": supplemental_status,
+            "rates_to_cny": rates_to_cny,
             "status": "ok",
         }
     except Exception as exc:
@@ -321,7 +442,11 @@ def fetch_fx() -> dict:
         return {
             "date": "",
             "source": url,
-            "rates_to_cny": {"CNY": 1.0, "USD": None, "HKD": None},
+            "supplemental_source": TENCENT_FX_SOURCE,
+            "rates_to_cny": {
+                currency: (1.0 if currency == "CNY" else None)
+                for currency in sorted(required | {"CNY", "USD", "HKD"})
+            },
             "status": f"failed: {exc}",
         }
 
@@ -555,7 +680,7 @@ def latest_sec_report(ticker: str, ticker_map: dict) -> dict:
         retries=1,
     )
     recent = submission["filings"]["recent"]
-    preferred = ["10-K", "20-F"]
+    preferred = ["10-K", "20-F", "40-F"]
     chosen = None
     for form in preferred:
         for index, candidate in enumerate(recent["form"]):
@@ -599,11 +724,90 @@ def latest_sec_report(ticker: str, ticker_map: dict) -> dict:
         pass
     return {
         "url": url,
+        "cik": cik,
+        "accession_number": accession_display,
         "form": recent["form"][chosen],
         "filing_date": filing_date,
         "report_date": report_date,
         "employees": employee_count,
     }
+
+
+def sec_usd_fact(
+    company_facts: dict,
+    tag: str,
+    report_date: str,
+    accession_number: str,
+) -> Optional[float]:
+    units = (
+        company_facts.get("facts", {})
+        .get("us-gaap", {})
+        .get(tag, {})
+        .get("units", {})
+        .get("USD", [])
+    )
+    candidates = [
+        row
+        for row in units
+        if row.get("end") == report_date
+        and row.get("form") in {"10-K", "20-F", "40-F"}
+        and (
+            not accession_number
+            or row.get("accn") == accession_number
+        )
+    ]
+    if not candidates:
+        candidates = [
+            row
+            for row in units
+            if row.get("end") == report_date
+            and row.get("form") in {"10-K", "20-F", "40-F"}
+        ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: str(row.get("filed") or ""))
+    return finite_number(candidates[-1].get("val"))
+
+
+def sec_debt_local_100m(sec: dict, report_date: str) -> Optional[float]:
+    cik = str(sec.get("cik") or "")
+    if not cik or not report_date:
+        return None
+    payload = request_json(
+        f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json",
+        headers=SEC_HEADERS,
+        timeout=35,
+        retries=1,
+    )
+    accession = str(sec.get("accession_number") or "")
+    # Prefer an issuer-reported all-in debt total when available.
+    for tag in (
+        "DebtAndCapitalLeaseObligations",
+        "LongTermDebtAndFinanceLeaseObligationsCurrentAndNoncurrent",
+    ):
+        value = sec_usd_fact(payload, tag, report_date, accession)
+        if value is not None:
+            return value / 100_000_000
+
+    # Some issuers disclose bank debt and convertible notes in separate tags.
+    combined_debt = sec_usd_fact(
+        payload,
+        "DebtLongtermAndShorttermCombinedAmount",
+        report_date,
+        accession,
+    )
+    convertible_notes = sec_usd_fact(
+        payload,
+        "ConvertibleLongTermNotesPayable",
+        report_date,
+        accession,
+    )
+    components = [
+        value
+        for value in (combined_debt, convertible_notes)
+        if value is not None
+    ]
+    return sum(components) / 100_000_000 if components else None
 
 
 def latest_long_item(
@@ -738,6 +942,14 @@ def fetch_us_company(company: dict, ticker_map: dict) -> dict:
             result["debt_local_100m"] = local_100m(debt)
         except Exception as exc:
             errors.append(f"balance: {exc}")
+        if result.get("debt_local_100m") is None and sec:
+            try:
+                result["debt_local_100m"] = sec_debt_local_100m(
+                    sec,
+                    report_date,
+                )
+            except Exception as exc:
+                errors.append(f"SEC debt facts: {exc}")
     except Exception as exc:
         errors.append(f"indicator: {exc}")
     result["errors"] = errors
@@ -776,7 +988,10 @@ def tencent_annual_report(report_year: int) -> str:
 
 
 def fetch_hk_company(company: dict, ticker_map: dict) -> dict:
-    code = company["financial_symbol"]
+    # Older seeds store a bare five-digit code while expanded catalog entries
+    # may carry the display ticker suffix. AKShare's HK endpoints require the
+    # bare code, so accept both representations.
+    code = str(company["financial_symbol"]).upper().removesuffix(".HK").zfill(5)
     errors: list[str] = []
     sec = (
         latest_sec_report(company["sec_ticker"], ticker_map)
@@ -916,7 +1131,7 @@ def data_quality_score(company: dict) -> int:
 def make_event_rows(companies: list[dict], as_of: str) -> list[list[Any]]:
     rows: list[list[Any]] = []
     for company in companies:
-        if company["market"] != "A":
+        if not is_valuation_target(company):
             continue
         growth = company.get("revenue_growth")
         margin = company.get("net_margin")
@@ -985,7 +1200,7 @@ def append_history(companies: list[dict], as_of: str) -> None:
             company.get("quote_date") or as_of,
         )
         for company in companies
-        if company["market"] == "A"
+        if is_valuation_target(company)
     }
     existing = [
         row
@@ -1013,7 +1228,7 @@ def append_history(companies: list[dict], as_of: str) -> None:
     rates = CURRENT_FX.get("rates_to_cny", {})
     new_rows: list[dict] = []
     for company in companies:
-        if company["market"] != "A":
+        if not is_valuation_target(company):
             continue
         quote_rate = company.get("quote_fx_to_cny") or rates.get(
             company.get("quote_currency")
@@ -1184,7 +1399,7 @@ def main() -> int:
             "status": "retained_for_financial_refresh",
         }
     else:
-        CURRENT_FX = fetch_fx()
+        CURRENT_FX = fetch_fx(companies)
         if CURRENT_FX.get("status") != "ok":
             return retain_prior_snapshot(
                 "fx",
@@ -1220,6 +1435,15 @@ def main() -> int:
                     result = fetch_us_company(company, ticker_map)
             except Exception as exc:
                 result = {"errors": [f"financial fetch: {exc}"]}
+            source_override = official_report_source_override(company)
+            source_override_report_date = (
+                official_report_source_override_report_date(company)
+            )
+            if (
+                source_override
+                and result.get("report_date") == source_override_report_date
+            ):
+                result["official_report_source"] = source_override
             candidates.append(result)
             if (
                 not missing_financial_core_fields(result)

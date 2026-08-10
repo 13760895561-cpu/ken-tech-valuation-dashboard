@@ -1,7 +1,38 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
-import { deriveCompanies } from "../lib/model.ts";
+import {
+  buildDashboardData,
+  deriveCompanies,
+  isValuationTarget,
+} from "../lib/model.ts";
+
+test("valuation targets prefer the explicit flag and preserve the legacy focus rule", () => {
+  assert.equal(
+    isValuationTarget({ market: "A", role: "重点观察" }),
+    true,
+  );
+  assert.equal(
+    isValuationTarget({ market: "A", role: "A股可比" }),
+    false,
+  );
+  assert.equal(
+    isValuationTarget({
+      market: "A",
+      role: "重点观察",
+      valuation_target: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isValuationTarget({
+      market: "US",
+      role: "全球参考",
+      valuation_target: true,
+    }),
+    true,
+  );
+});
 
 test("static export contains the complete branded dashboard", async () => {
   const [html, chunks, dataset] = await Promise.all([
@@ -12,7 +43,7 @@ test("static export contains the complete branded dashboard", async () => {
 
   assert.match(html, /科技股长期估值与经营效率看板/);
   assert.ok(chunks.some((name) => name.endsWith(".js")));
-  assert.equal(JSON.parse(dataset).snapshot.companies.length, 31);
+  assert.equal(JSON.parse(dataset).snapshot.companies.length, 61);
 });
 
 test("embedded delivery data preserves audited coverage", async () => {
@@ -20,29 +51,60 @@ test("embedded delivery data preserves audited coverage", async () => {
     await readFile(new URL("../lib/seed-data.json", import.meta.url), "utf8"),
   );
 
-  assert.equal(seed.snapshot.companies.length, 31);
-  assert.equal(
-    seed.snapshot.companies.filter((company) => company.market === "A").length,
-    15,
+  const companies = seed.snapshot.companies;
+  const valuationTargets = companies.filter(isValuationTarget);
+  const dashboard = buildDashboardData(seed);
+
+  assert.equal(companies.length, 61);
+  assert.equal(valuationTargets.length, 15);
+  assert.equal(dashboard.summary.companyCount, 61);
+  assert.equal(dashboard.summary.targetCompanyCount, 15);
+  assert.equal(dashboard.valuations.length, 15);
+  assert.deepEqual(
+    dashboard.valuations.map((company) => company.id).sort(),
+    valuationTargets.map((company) => company.id).sort(),
   );
   assert.equal(seed.events.length, 16);
   assert.ok(seed.history.length >= 15);
-  assert.ok(seed.snapshot.companies.every((company) => company.currency));
-  assert.ok(seed.snapshot.companies.every((company) => company.quote_currency));
+  assert.ok(companies.every((company) => company.currency));
+  assert.ok(companies.every((company) => company.quote_currency));
   assert.ok(
-    seed.snapshot.companies.every((company) => company.financial_currency),
+    companies.every((company) => company.financial_currency),
   );
   assert.ok(
-    seed.snapshot.companies.every(
+    companies.every(
       (company) => Number.isFinite(company.quote_fx_to_cny),
     ),
   );
   assert.ok(
-    seed.snapshot.companies.every(
+    companies.every(
       (company) => Number.isFinite(company.financial_fx_to_cny),
     ),
   );
-  assert.ok(seed.snapshot.companies.every((company) => company.report_period));
+  assert.ok(companies.every((company) => company.report_period));
+  for (const field of [
+    "revenue_local_100m",
+    "gross_profit_local_100m",
+    "net_profit_local_100m",
+    "ocf_local_100m",
+    "capex_local_100m",
+    "cash_local_100m",
+    "debt_local_100m",
+    "employees",
+  ]) {
+    assert.ok(
+      companies.every((company) => Number.isFinite(company[field])),
+      `${field} must be complete for all 61 default companies`,
+    );
+  }
+  assert.ok(
+    companies.every(
+      (company) =>
+        String(company.official_report_source).startsWith("https://") &&
+        !String(company.official_report_source).includes("eastmoney.com"),
+    ),
+    "official report evidence must not point to the structured-data provider",
+  );
   assert.ok(seed.history.every((row) => row.行情币种 && row.财务币种));
 });
 
@@ -96,6 +158,54 @@ test("quote and financial currencies are converted independently", async () => {
   assert.equal(
     partiallyMigratedDerived.revenueCny100m,
     partiallyMigrated.revenue_local_100m,
+  );
+});
+
+test("financial automation preserves expanded-universe audit controls", async () => {
+  const [prepareFinancials, applyFinancials, updateData] = await Promise.all([
+    readFile(
+      new URL("../scripts/prepare-financial-input.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../scripts/apply-financial-snapshot.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../automation/scripts/update_data.py", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(prepareFinancials, /"09888": "BIDU"/);
+  assert.match(prepareFinancials, /official_report_source_override/);
+  assert.match(prepareFinancials, /valuation_target:/);
+  assert.match(prepareFinancials, /normalizedCurrency/);
+
+  assert.match(updateData, /TENCENT_FX_SOURCE/);
+  assert.match(updateData, /"whEURCNY": \("EUR", False\)/);
+  assert.match(updateData, /"whTWDCNY": \("TWD", False\)/);
+  assert.match(updateData, /required_currencies/);
+  assert.match(updateData, /def is_valuation_target/);
+  assert.match(updateData, /if not is_valuation_target\(company\):/);
+  assert.match(updateData, /removesuffix\("\.HK"\)/);
+  assert.match(updateData, /CURRENT_FX = fetch_fx\(companies\)/);
+  assert.match(updateData, /official_report_source_override/);
+  assert.match(updateData, /official_report_source_override_report_date/);
+  assert.match(updateData, /"40-F"/);
+
+  assert.match(
+    applyFinancials,
+    /currentEmployees !== null && currentEmployees > 0/,
+  );
+  assert.match(
+    applyFinancials,
+    /candidateEmployees !== null && candidateEmployees > 0/,
+  );
+  assert.match(applyFinancials, /official_report_source_override/);
+  assert.match(
+    applyFinancials,
+    /official_report_source_override_report_date/,
   );
 });
 

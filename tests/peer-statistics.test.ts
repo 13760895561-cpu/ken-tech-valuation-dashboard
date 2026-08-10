@@ -124,6 +124,15 @@ test("peer groups calculate A-share, China anchor, and US buckets independently"
       trackingOrigin: "custom",
       ps: 999,
     },
+    {
+      id: "excluded",
+      name: "不参与统计",
+      ticker: "EXCLUDED",
+      group: "测试组",
+      region: "美股",
+      include_in_stats: false,
+      ps: 999,
+    },
   ];
 
   const [group] = buildPeerGroupStatistics(companies);
@@ -133,6 +142,11 @@ test("peer groups calculate A-share, China anchor, and US buckets independently"
   assert.equal(group.lowConfidence, true);
   assert.equal(group.summary.revenuePerEmployeeMedian, 150);
   assert.equal(group.summary.psMedian, 30);
+  assert.ok(
+    group.buckets.every((bucket) =>
+      bucket.companies.every((company) => company.id !== "excluded"),
+    ),
+  );
 
   const aShare = group.buckets[0];
   assert.deepEqual(

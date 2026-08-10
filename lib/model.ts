@@ -18,6 +18,18 @@ type MetricKey =
 
 type BandMode = "low" | "center" | "high";
 
+/**
+ * Keeps valuation coverage independent from market coverage. New snapshots can
+ * opt in explicitly; legacy snapshots retain the audited A-share focus set.
+ */
+export function isValuationTarget(
+  company: Pick<CompanySnapshot, "market" | "role" | "valuation_target">,
+): boolean {
+  return typeof company.valuation_target === "boolean"
+    ? company.valuation_target
+    : company.market === "A" && company.role === "重点观察";
+}
+
 export function finiteNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "") {
@@ -336,7 +348,7 @@ export function calculateValuations(
   const weights = methodology.confidence_weights;
 
   return companies
-    .filter((company) => company.market === "A")
+    .filter(isValuationTarget)
     .map((target) => {
       const domesticPeerCount = companies.filter(
         (company) =>
@@ -482,8 +494,7 @@ function buildSummary(
   );
   return {
     companyCount: companies.length,
-    targetCompanyCount: companies.filter((company) => company.market === "A")
-      .length,
+    targetCompanyCount: companies.filter(isValuationTarget).length,
     valuationCount: valuations.length,
     completeCoreCount: companies.filter(
       (company) => company.coreStatus === "OK",

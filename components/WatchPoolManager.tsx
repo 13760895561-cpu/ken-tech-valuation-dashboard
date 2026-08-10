@@ -374,7 +374,7 @@ export default function WatchPoolManager({
   const restoreDefaults = () => {
     commit(
       { ...state, hiddenDefaultIds: [] },
-      "已恢复全部 31 家默认公司",
+      `已恢复全部 ${defaultCompanies.length} 家默认公司`,
     );
   };
 
@@ -566,7 +566,7 @@ export default function WatchPoolManager({
             <section className="watch-pool-section">
               <div className="watch-pool-section-heading">
                 <div>
-                  <h3>默认 31 家</h3>
+                  <h3>默认 {defaultCompanies.length} 家</h3>
                   <p>
                     隐藏只改变本机显示，不会删除共享数据、历史或定时更新。
                   </p>
@@ -965,7 +965,7 @@ export default function WatchPoolManager({
                 </div>
               ) : (
                 <div className="watch-pool-empty">
-                  尚未添加自定义公司。默认 31 家不会受到影响。
+                  尚未添加自定义公司。默认 {defaultCompanies.length} 家不会受到影响。
                 </div>
               )}
             </section>

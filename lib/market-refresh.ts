@@ -2,6 +2,7 @@ import {
   calculateValuations,
   deriveCompanies,
   finiteNumber,
+  isValuationTarget,
 } from "./model";
 import type {
   CompanySnapshot,
@@ -12,6 +13,7 @@ import type {
 } from "./dashboard-types";
 
 export const TENCENT_QUOTE_SOURCE = "https://qt.gtimg.cn/";
+export const TENCENT_QUOTE_BATCH_SIZE = 30;
 const FX_SOURCE =
   "https://api.frankfurter.dev/v1/latest?base=USD&symbols=CNY,HKD";
 const TENCENT_FX_SOURCE =
@@ -192,17 +194,29 @@ function parseTencentQuotes(
   return updates;
 }
 
+export function chunkTencentRequests<T>(items: readonly T[]): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += TENCENT_QUOTE_BATCH_SIZE) {
+    chunks.push(items.slice(index, index + TENCENT_QUOTE_BATCH_SIZE));
+  }
+  return chunks;
+}
+
 async function fetchQuotes(
   companies: CompanySnapshot[],
 ): Promise<Map<string, TencentQuoteUpdate>> {
-  const url = `${TENCENT_QUOTE_SOURCE}q=${companies
-    .map((company) => company.quote_code)
-    .join(",")}`;
-  const response = await fetchWithRetry(url, "腾讯行情");
-  const updates = parseTencentQuotes(
-    decodeTencent(await response.arrayBuffer()),
-    companies,
-  );
+  const updates = new Map<string, TencentQuoteUpdate>();
+  for (const chunk of chunkTencentRequests(companies)) {
+    const url = `${TENCENT_QUOTE_SOURCE}q=${chunk
+      .map((company) => company.quote_code)
+      .join(",")}`;
+    const response = await fetchWithRetry(url, "腾讯行情");
+    const parsed = parseTencentQuotes(
+      decodeTencent(await response.arrayBuffer()),
+      chunk,
+    );
+    for (const [id, quote] of parsed) updates.set(id, quote);
+  }
   if (updates.size !== companies.length) {
     const missing = companies
       .filter((company) => !updates.has(company.id))
@@ -233,8 +247,7 @@ export async function fetchCustomQuoteUpdates(
     ).values(),
   ];
 
-  for (let index = 0; index < unique.length; index += 30) {
-    const chunk = unique.slice(index, index + 30);
+  for (const chunk of chunkTencentRequests(unique)) {
     const instruments: QuoteInstrument[] = chunk.map((request) => ({
       id: request.id,
       name: request.name,
@@ -352,7 +365,7 @@ function historyRowsForSnapshot(
   companies: DerivedCompany[],
 ): HistoryRecord[] {
   return companies
-    .filter((company) => company.market === "A")
+    .filter(isValuationTarget)
     .map((company) => {
       const { quoteCurrency, financialCurrency } = companyCurrencies(company);
       return {

@@ -13,6 +13,7 @@
     "check": "tsc --noEmit",
     "sync:static": "tsx scripts/refresh-static-data.ts --copy",
     "refresh:static": "tsx scripts/refresh-static-data.ts --refresh",
+    "expand:universe": "tsx scripts/expand-default-universe.ts",
     "prepare:financials": "tsx scripts/prepare-financial-input.ts",
     "apply:financials": "tsx scripts/apply-financial-snapshot.ts"
   },

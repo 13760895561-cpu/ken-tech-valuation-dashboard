@@ -38,6 +38,7 @@ const FINANCIAL_DATA_FIELDS = [
   "gross_margin",
   "net_margin",
   "roic",
+  "employees",
   "official_report_source",
   "ocf_local_100m",
   "capex_local_100m",
@@ -130,19 +131,36 @@ const companies = dataset.snapshot.companies.map((current) => {
       (merged as Record<string, unknown>)[field] = next[field];
     }
   }
-  merged.employees = current.employees;
   const currentEmployees = finiteNumber(current.employees);
   const candidateEmployees = finiteNumber(next.employees);
-  if (
-    candidateEmployees === null ||
-    currentEmployees === null ||
-    candidateEmployees !== currentEmployees
-  ) {
+  if (currentEmployees !== null && currentEmployees > 0) {
+    merged.employees = currentEmployees;
+    if (
+      candidateEmployees === null ||
+      candidateEmployees !== currentEmployees
+    ) {
+      warnings.push({
+        id: current.id,
+        name: current.name,
+        warning:
+          "员工数已锁定：本次候选缺失或与最近核验值不同，继续沿用最近核验值",
+      });
+    }
+  } else if (candidateEmployees !== null && candidateEmployees > 0) {
+    merged.employees = candidateEmployees;
     warnings.push({
       id: current.id,
       name: current.name,
       warning:
-        "员工数未自动覆盖：该字段需从同一份官方年报人工复核，当前继续沿用最近核验值",
+        "员工数首次采用本次候选值；该值已进入核验基线，后续自动更新将锁定沿用",
+    });
+  } else {
+    merged.employees = current.employees;
+    warnings.push({
+      id: current.id,
+      name: current.name,
+      warning:
+        "员工数缺失：当前与候选均无有效正数，需从同一份官方年报补充核验",
     });
   }
   const extractionWarnings = [
@@ -222,7 +240,7 @@ const status = {
   checkedAt,
   mode: "latest-complete-annual-report",
   sourcePolicy:
-    "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值，员工数缺失时单独沿用最近核验值。",
+    "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   companyCount: companies.length,
   acceptedCount,
   changedCount: changedIds.length,
@@ -416,15 +434,38 @@ function validateOfficialReportSource(
     return "缺少格式有效的官方年报链接";
   }
   if (url.protocol !== "https:") return "官方年报链接必须使用 HTTPS";
-  const host = url.hostname.toLowerCase();
-  if (company.market === "A") {
-    if (
-      !host.endsWith("cninfo.com.cn") ||
-      !url.pathname.toLowerCase().endsWith(".pdf")
-    ) {
-      return "A股候选缺少巨潮资讯年度报告 PDF";
+  const configuredOverride = String(
+    company.official_report_source_override ?? "",
+  ).trim();
+  const configuredOverrideReportDate = String(
+    company.official_report_source_override_report_date ?? "",
+  ).trim();
+  if (
+    configuredOverride &&
+    company.report_date === configuredOverrideReportDate
+  ) {
+    let overrideUrl: URL;
+    try {
+      overrideUrl = new URL(configuredOverride);
+    } catch {
+      return "配置的官方年报覆盖链接格式无效";
+    }
+    if (overrideUrl.protocol !== "https:") {
+      return "配置的官方年报覆盖链接必须使用 HTTPS";
+    }
+    if (overrideUrl.href !== url.href) {
+      return "候选官方年报链接与配置的覆盖链接不一致";
     }
     return null;
+  }
+  const host = url.hostname.toLowerCase();
+  if (company.market === "A") {
+    const isPdf = url.pathname.toLowerCase().endsWith(".pdf");
+    const isCninfo = host.endsWith("cninfo.com.cn");
+    const isSse = host.endsWith("sse.com.cn");
+    return isPdf && (isCninfo || isSse)
+      ? null
+      : "A股候选缺少巨潮资讯或上交所年度报告 PDF";
   }
   if (company.market === "US") {
     return host.endsWith("sec.gov") &&
