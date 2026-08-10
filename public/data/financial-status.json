@@ -1,46 +1,18 @@
 {
-  "checkedAt": "2026-08-10T02:13:34.643Z",
+  "checkedAt": "2026-08-10T23:56:51.997Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
-  "acceptedCount": 56,
-  "changedCount": 17,
-  "unchangedAcceptedCount": 39,
-  "retainedLastGoodCount": 5,
-  "changedIds": [
-    "MSFT",
-    "688825",
-    "TSM",
-    "ARM",
-    "MRVL",
-    "MU",
-    "CIEN",
-    "CRDO",
-    "09888",
-    "ORCL",
-    "CRM",
-    "NOW",
-    "CLS",
-    "VRT",
-    "SNX",
-    "WCC",
-    "CDW"
-  ],
+  "acceptedCount": 58,
+  "changedCount": 0,
+  "unchangedAcceptedCount": 58,
+  "retainedLastGoodCount": 3,
+  "changedIds": [],
   "failed": [
     {
       "id": "00700",
       "name": "腾讯控股",
       "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
-    },
-    {
-      "id": "HPE",
-      "name": "慧与科技",
-      "reason": "debt_local_100m 缺失"
-    },
-    {
-      "id": "SMCI",
-      "name": "超微电脑",
-      "reason": "debt_local_100m 缺失"
     },
     {
       "id": "AVT",
@@ -59,7 +31,7 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-08-10T10:01:37+08:00",
+    "attempted_at": "2026-08-11T07:52:12+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
@@ -76,7 +48,7 @@
       "reused_quick_count": 0,
       "fallback_count": 3,
       "failed_count": 0,
-      "warning_count": 5,
+      "warning_count": 3,
       "latest_report_date": "2026-06-30",
       "status": "partial_fallback"
     },
