@@ -1,19 +1,18 @@
 {
-  "checkedAt": "2026-08-14T00:05:04.756Z",
+  "checkedAt": "2026-08-14T23:44:01.133Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
-  "acceptedCount": 55,
-  "changedCount": 0,
-  "unchangedAcceptedCount": 55,
-  "retainedLastGoodCount": 6,
-  "changedIds": [],
+  "acceptedCount": 57,
+  "changedCount": 3,
+  "unchangedAcceptedCount": 54,
+  "retainedLastGoodCount": 4,
+  "changedIds": [
+    "COHR",
+    "AVT",
+    "TSM"
+  ],
   "failed": [
-    {
-      "id": "COHR",
-      "name": "Coherent",
-      "reason": "本次自动抓取失败，继续保留最近核验值：official report period mismatch: SEC 2025-06-30 vs structured 2026-06-30"
-    },
     {
       "id": "LITE",
       "name": "Lumentum",
@@ -30,11 +29,6 @@
       "reason": "本次自动抓取失败，继续保留最近核验值：official report period mismatch: SEC 2025-06-30 vs structured 2026-06-30"
     },
     {
-      "id": "AVT",
-      "name": "Avnet",
-      "reason": "本次自动抓取失败，继续保留最近核验值：official report period mismatch: SEC 2025-06-28 vs structured 2026-06-27"
-    },
-    {
       "id": "ANET",
       "name": "Arista Networks",
       "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
@@ -46,24 +40,24 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-08-14T08:00:31+08:00",
+    "attempted_at": "2026-08-15T07:39:54+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
     "retained_snapshot_generated_at": "",
     "live_quote_success_count": 61,
-    "quote_date_min": "2026-08-12",
-    "quote_date_max": "2026-08-13",
-    "fx_date": "2026-08-12",
+    "quote_date_min": "2026-08-13",
+    "quote_date_max": "2026-08-14",
+    "fx_date": "2026-08-13",
     "financial_refresh_meta": {
       "mode": "financial_only",
       "automatic": true,
       "attempted_count": 61,
-      "refreshed_count": 55,
+      "refreshed_count": 57,
       "reused_quick_count": 0,
-      "fallback_count": 6,
+      "fallback_count": 4,
       "failed_count": 0,
-      "warning_count": 6,
+      "warning_count": 4,
       "latest_report_date": "2026-06-30",
       "status": "partial_fallback"
     },
