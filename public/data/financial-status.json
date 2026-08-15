@@ -1,17 +1,13 @@
 {
-  "checkedAt": "2026-08-14T23:44:01.133Z",
+  "checkedAt": "2026-08-15T23:41:20.156Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
   "acceptedCount": 57,
-  "changedCount": 3,
-  "unchangedAcceptedCount": 54,
+  "changedCount": 0,
+  "unchangedAcceptedCount": 57,
   "retainedLastGoodCount": 4,
-  "changedIds": [
-    "COHR",
-    "AVT",
-    "TSM"
-  ],
+  "changedIds": [],
   "failed": [
     {
       "id": "LITE",
@@ -40,15 +36,15 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-08-15T07:39:54+08:00",
+    "attempted_at": "2026-08-16T07:36:31+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
     "retained_snapshot_generated_at": "",
     "live_quote_success_count": 61,
-    "quote_date_min": "2026-08-13",
+    "quote_date_min": "2026-08-14",
     "quote_date_max": "2026-08-14",
-    "fx_date": "2026-08-13",
+    "fx_date": "2026-08-14",
     "financial_refresh_meta": {
       "mode": "financial_only",
       "automatic": true,
