@@ -1,15 +1,13 @@
 {
-  "checkedAt": "2026-08-28T07:03:02.798Z",
+  "checkedAt": "2026-08-29T04:16:16.479Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
   "acceptedCount": 59,
-  "changedCount": 1,
-  "unchangedAcceptedCount": 58,
+  "changedCount": 0,
+  "unchangedAcceptedCount": 59,
   "retainedLastGoodCount": 2,
-  "changedIds": [
-    "300475"
-  ],
+  "changedIds": [],
   "failed": [
     {
       "id": "SMCI",
@@ -28,15 +26,15 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-08-28T14:57:05+08:00",
+    "attempted_at": "2026-08-29T12:10:50+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
     "retained_snapshot_generated_at": "",
     "live_quote_success_count": 61,
-    "quote_date_min": "2026-08-27",
-    "quote_date_max": "2026-08-27",
-    "fx_date": "2026-08-27",
+    "quote_date_min": "2026-08-28",
+    "quote_date_max": "2026-08-28",
+    "fx_date": "2026-08-28",
     "financial_refresh_meta": {
       "mode": "financial_only",
       "automatic": true,
