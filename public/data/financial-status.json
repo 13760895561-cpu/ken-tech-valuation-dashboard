@@ -1,19 +1,16 @@
 {
-  "checkedAt": "2026-08-31T01:28:47.206Z",
+  "checkedAt": "2026-09-01T01:54:06.180Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
-  "acceptedCount": 59,
-  "changedCount": 0,
+  "acceptedCount": 60,
+  "changedCount": 1,
   "unchangedAcceptedCount": 59,
-  "retainedLastGoodCount": 2,
-  "changedIds": [],
+  "retainedLastGoodCount": 1,
+  "changedIds": [
+    "SMCI"
+  ],
   "failed": [
-    {
-      "id": "SMCI",
-      "name": "超微电脑",
-      "reason": "本次自动抓取失败，继续保留最近核验值：official report period mismatch: SEC 2025-06-30 vs structured 2026-06-30"
-    },
     {
       "id": "ANET",
       "name": "Arista Networks",
@@ -21,29 +18,29 @@
     }
   ],
   "warnings": [],
-  "reportDateMin": "2025-06-30",
+  "reportDateMin": "2025-08-28",
   "reportDateMax": "2026-06-30",
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-08-31T09:23:35+08:00",
+    "attempted_at": "2026-09-01T09:50:35+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
     "retained_snapshot_generated_at": "",
     "live_quote_success_count": 61,
-    "quote_date_min": "2026-08-28",
-    "quote_date_max": "2026-08-28",
-    "fx_date": "2026-08-28",
+    "quote_date_min": "2026-08-31",
+    "quote_date_max": "2026-08-31",
+    "fx_date": "2026-08-31",
     "financial_refresh_meta": {
       "mode": "financial_only",
       "automatic": true,
       "attempted_count": 61,
-      "refreshed_count": 59,
+      "refreshed_count": 60,
       "reused_quick_count": 0,
-      "fallback_count": 2,
+      "fallback_count": 1,
       "failed_count": 0,
-      "warning_count": 2,
+      "warning_count": 1,
       "latest_report_date": "2026-06-30",
       "status": "partial_fallback"
     },
