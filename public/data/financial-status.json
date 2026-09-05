@@ -1,17 +1,87 @@
 {
-  "checkedAt": "2026-09-04T01:11:04.316Z",
+  "checkedAt": "2026-09-05T01:10:30.054Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
-  "acceptedCount": 60,
+  "acceptedCount": 46,
   "changedCount": 0,
-  "unchangedAcceptedCount": 60,
-  "retainedLastGoodCount": 1,
+  "unchangedAcceptedCount": 46,
+  "retainedLastGoodCount": 15,
   "changedIds": [],
   "failed": [
     {
+      "id": "688041",
+      "name": "海光信息",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "688047",
+      "name": "龙芯中科",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "300308",
+      "name": "中际旭创",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "300394",
+      "name": "天孚通信",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "002230",
+      "name": "科大讯飞",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "600588",
+      "name": "用友网络",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "601138",
+      "name": "工业富联",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "603019",
+      "name": "中科曙光",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "300184",
+      "name": "力源信息",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "000988",
+      "name": "华工科技",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "688498",
+      "name": "源杰科技",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "000034",
+      "name": "神州数码",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
       "id": "ANET",
       "name": "Arista Networks",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "300475",
+      "name": "香农芯创",
+      "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
+    },
+    {
+      "id": "301099",
+      "name": "雅创电子",
       "reason": "本次自动抓取未形成新候选，继续保留最近核验值"
     }
   ],
@@ -21,24 +91,24 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-09-04T09:06:04+08:00",
+    "attempted_at": "2026-09-05T09:00:06+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
     "retained_snapshot_generated_at": "",
     "live_quote_success_count": 61,
-    "quote_date_min": "2026-09-03",
-    "quote_date_max": "2026-09-03",
-    "fx_date": "2026-09-03",
+    "quote_date_min": "2026-09-04",
+    "quote_date_max": "2026-09-04",
+    "fx_date": "2026-09-04",
     "financial_refresh_meta": {
       "mode": "financial_only",
       "automatic": true,
       "attempted_count": 61,
-      "refreshed_count": 60,
+      "refreshed_count": 46,
       "reused_quick_count": 0,
-      "fallback_count": 1,
+      "fallback_count": 15,
       "failed_count": 0,
-      "warning_count": 1,
+      "warning_count": 15,
       "latest_report_date": "2026-06-30",
       "status": "partial_fallback"
     },
