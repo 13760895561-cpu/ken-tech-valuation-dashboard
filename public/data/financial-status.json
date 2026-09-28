@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-09-27T01:34:31.432Z",
+  "checkedAt": "2026-09-28T01:46:23.302Z",
   "mode": "latest-complete-annual-report",
   "sourcePolicy": "官方财报链接为证据基准，AKShare/东方财富仅用于结构化提取；核心财务字段校验失败则保留最近核验值；员工数首次采用有效候选值形成基线，后续自动更新锁定沿用。",
   "companyCount": 61,
@@ -21,7 +21,7 @@
   "upstreamStatus": {
     "status": "ok_with_financial_fallback",
     "mode_requested": "financial_only",
-    "attempted_at": "2026-09-27T09:30:14+08:00",
+    "attempted_at": "2026-09-28T09:42:07+08:00",
     "failure_stage": "",
     "reason": "",
     "retained_snapshot_as_of": "",
